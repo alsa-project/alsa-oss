@@ -19,6 +19,8 @@
  *
  */
 
+#define _GNU_SOURCE
+
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/stat.h>
@@ -38,8 +40,6 @@
 
 snd_pcm_uframes_t _snd_pcm_boundary(snd_pcm_t *pcm);
 snd_pcm_uframes_t _snd_pcm_mmap_hw_ptr(snd_pcm_t *pcm);
-
-#define _GNU_SOURCE
 
 static int debug = 0;
 
