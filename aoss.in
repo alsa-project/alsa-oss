@@ -4,4 +4,4 @@
 # Usage:
 #	aoss <command> <command options and arguments>
 
-LD_PRELOAD=PREFIX/libaoss.so $*
+LD_PRELOAD=@prefix@/lib/libaoss.so $*
