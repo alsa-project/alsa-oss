@@ -14,6 +14,7 @@
 //static char data[500000];
 static int verbose;
 static char *device = "/dev/dsp";
+static int format = AFMT_S16_LE;
 static int rate = 48000;
 static int channels = 2;
 static int omode = O_RDWR;
@@ -46,6 +47,12 @@ static void help(void)
 static void set_params(int do_mmap)
 {
 	int caps;
+
+	if (oss_pcm_ioctl(fd, SNDCTL_DSP_SETFMT, &format) < 0) {
+		perror("SNDCTL_DSP_SETFMT\n");
+		exit(EXIT_FAILURE);
+	}
+	printf("Format set to %d\n", format);
 
 	if (oss_pcm_ioctl(fd, SNDCTL_DSP_SPEED, &rate) < 0) {
 		perror("SNDCTL_DSP_SPEED\n");
@@ -127,6 +134,7 @@ static void set_trigger(void)
 {
 	int tmp;
 
+	tmp = 0;
 	if (oss_pcm_ioctl(fd, SNDCTL_DSP_SETTRIGGER, &tmp) < 0) {
 		perror("SNDCTL_DSP_SETTRIGGER");
 		exit(EXIT_FAILURE);
