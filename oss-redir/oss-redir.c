@@ -49,8 +49,8 @@ ssize_t (*oss_pcm_write)(int fd, const void *buf, size_t count);
 void * (*oss_pcm_mmap)(void *start, size_t length, int prot, int flags, int fd, off_t offset);
 int (*oss_pcm_munmap)(void *start, size_t length);
 int (*oss_pcm_ioctl)(int fd, unsigned long int request, ...);
-int (*oss_pcm_select_prepare)(int fd, fd_set *readfds, fd_set *writefds);
-int (*oss_pcm_select_result)(int fd, fd_set *readfds, fd_set *writefds);
+int (*oss_pcm_select_prepare)(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds);
+int (*oss_pcm_select_result)(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds);
 int (*oss_pcm_poll_fds)(int fd);
 int (*oss_pcm_poll_prepare)(int fd, struct pollfd *ufds);
 int (*oss_pcm_poll_result)(int fd, struct pollfd *ufds);
@@ -74,18 +74,22 @@ static int native_pcm_nonblock(int fd, int nonblock)
 	return 0;
 }
 
-static int native_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds)
+static int native_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds)
 {
 	if (fd < 0)
 		return -EINVAL;
-	if (readfds)
+	if (readfds) {
 		FD_SET(fd, readfds);
-	if (writefds)
+		FD_SET(fd, exceptfds);
+	}
+	if (writefds) {
 		FD_SET(fd, writefds);
+		FD_SET(fd, exceptfds);
+	}
 	return 0;
 }
 
-static int native_pcm_select_result(int fd, fd_set *readfds, fd_set *writefds)
+static int native_pcm_select_result(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds)
 {
 	int result = 0;
 
@@ -95,6 +99,8 @@ static int native_pcm_select_result(int fd, fd_set *readfds, fd_set *writefds)
 		result |= OSS_WAIT_EVENT_READ;
 	if (writefds && FD_ISSET(fd, writefds))
 		result |= OSS_WAIT_EVENT_WRITE;
+	if (exceptfds && FD_ISSET(fd, exceptfds))
+		result |= OSS_WAIT_EVENT_ERROR;
 	return result;
 }
 
@@ -124,6 +130,8 @@ static int native_pcm_poll_result(int fd, struct pollfd *ufds)
 		result |= OSS_WAIT_EVENT_READ;
 	if (ufds->events & POLLOUT)
 		result |= OSS_WAIT_EVENT_WRITE;
+	if (ufds->events & POLLERR)
+		result |= OSS_WAIT_EVENT_ERROR;
 	return result;
 }
 
