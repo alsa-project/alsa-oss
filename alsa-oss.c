@@ -240,7 +240,7 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 #endif
 		dsp->rate = snd_pcm_hw_params_value(&hw, SND_PCM_HW_PARAM_RATE);
 		dsp->format = alsa_format_to_oss(format);
-		str->frame_bytes = snd_pcm_format_physical_width(format) * dsp->channels;
+		str->frame_bytes = snd_pcm_format_physical_width(format) * dsp->channels / 8;
 		str->fragment_size = snd_pcm_hw_params_value(&hw, SND_PCM_HW_PARAM_FRAGMENT_SIZE);
 		str->fragments = snd_pcm_hw_params_value(&hw, SND_PCM_HW_PARAM_FRAGMENTS);
 		str->buffer_size = str->fragments * str->fragment_size;
