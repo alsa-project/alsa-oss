@@ -1,4 +1,4 @@
-    /*
+/*
 
     Copyright (C) 2000 Stefan Westerfeld
                        stefan@space.twc.de
@@ -18,7 +18,8 @@
     the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
     Boston, MA 02111-1307, USA.
 
-    */
+    Modified to add support for 64 bit fopen by Mike Hearn <mike@navi.cx>
+*/
 
 /*
  * This source only exists because some very special programs think that
@@ -67,28 +68,34 @@ static int fdc_clean (void *cookie)
 	return result;
 }
 
-static FILE *fake_fopen(const char *path, const char *mode)
+static FILE *fake_fopen(const char *path, const char *mode, int flags)
 {
 	cookie_io_functions_t fns = { fdc_read, fdc_write, fdc_seek, fdc_clean };
-	struct fd_cookie *fdc =
-		(struct fd_cookie *)malloc(sizeof(struct fd_cookie));
+	struct fd_cookie *fdc = (struct fd_cookie *)malloc(sizeof(struct fd_cookie));
 	const char *mptr;
 	int open_mode = 0;
 	FILE *result = 0;
 
-	for(mptr = mode; *mptr; mptr++)
-	{
+	for(mptr = mode; *mptr; mptr++) {
 		if(*mptr == 'r') open_mode |= 1; /* 1 = read */
 		if(*mptr == 'w') open_mode |= 2; /* 2 = write */
 		if(*mptr == '+') open_mode |= 3; /* 3 = readwrite */
 		if(*mptr == 'a') open_mode |= 2; /* append -> write */
   	}
-  	if(open_mode == 1) fdc->fd = open(path,O_RDONLY,0666);
-  	if(open_mode == 2) fdc->fd = open(path,O_WRONLY,0666);
-  	if(open_mode == 3) fdc->fd = open(path,O_RDWR,0666);
 
-	if(open_mode && fdc->fd > 0)
-	{
+  	switch (open_mode) {
+	case 1:
+		fdc->fd = open(path, O_RDONLY | flags, 0666);
+		break;
+	case 2:
+		fdc->fd = open(path, O_WRONLY | flags, 0666);
+		break;
+	default:
+		fdc->fd = open(path, O_RDWR | flags, 0666);
+		break;
+	}
+
+	if (open_mode && fdc->fd > 0) {
 		result = fopencookie (fdc,"w", fns);
 		result->_fileno = fdc->fd;		/* ugly patchy slimy kludgy hack */
 	}

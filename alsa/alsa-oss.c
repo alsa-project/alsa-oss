@@ -62,6 +62,10 @@
 #endif
 #endif
 
+#ifndef O_LARGEFILE
+#define O_LARGEFILE 0100000
+#endif
+
 int (*_select)(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
 int (*_poll)(struct pollfd *ufds, unsigned int nfds, int timeout);
 int (*_open)(const char *file, int oflag, ...);
@@ -689,32 +693,28 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 
 #include "stdioemu.c"
 
-FILE *fopen(const char* path, const char *mode) {
-
+FILE *fopen(const char* path, const char *mode)
+{
 	if (!initialized)
 		initialize();
 
 	if(!is_dsp_device(path)) 
 		return _fopen (path, mode);
 	
-	return fake_fopen(path, mode);
+	return fake_fopen(path, mode, 0);
 }
 
-#if 1
-# define strong_alias(name, aliasname) \
-  extern __typeof (name) aliasname __attribute__ ((alias (#name)));
-strong_alias(open, __open);
-strong_alias(close, __close);
-strong_alias(write, __write);
-strong_alias(read, __read);
-strong_alias(ioctl, __ioctl);
-strong_alias(fcntl, __fcntl);
-strong_alias(mmap, __mmap);
-strong_alias(munmap, __munmap);
-strong_alias(poll, __poll);
-strong_alias(select, __select);
-strong_alias(fopen, __fopen);
-#else
+FILE *fopen64(const char* path, const char *mode)
+{
+	if (!initialized)   
+		initialize(); 
+
+	if(!is_dsp_device(path))
+		return _fopen (path, mode);
+
+	return fake_fopen(path, mode, O_LARGEFILE);
+}
+
 int dup(int fd)
 {
 	return fcntl(fd, F_DUPFD, 0);
@@ -742,10 +742,6 @@ int dup2(int fd, int fd2)
 	return fcntl(fd, F_DUPFD, fd2);
 }
 
-#ifndef O_LARGEFILE
-#define O_LARGEFILE 0100000
-#endif
-
 int open64(const char *file, int oflag, ...)
 {
 	va_list args;
@@ -758,10 +754,25 @@ int open64(const char *file, int oflag, ...)
 	}
 	return open(file, oflag | O_LARGEFILE, mode);
 }
-#endif
 
-static void initialize() __attribute__ ((constructor));
+# define strong_alias(name, aliasname) \
+  extern __typeof (name) aliasname __attribute__ ((alias (#name)));
 
+strong_alias(open, __open);
+strong_alias(open64, __open64);
+strong_alias(close, __close);
+strong_alias(write, __write);
+strong_alias(read, __read);
+strong_alias(ioctl, __ioctl);
+strong_alias(fcntl, __fcntl);
+strong_alias(mmap, __mmap);
+strong_alias(munmap, __munmap);
+strong_alias(poll, __poll);
+strong_alias(select, __select);
+strong_alias(fopen, __fopen);
+strong_alias(fopen64, __fopen64);
+
+/* called by each override if needed */
 static void initialize()
 {
 	char *s = getenv("ALSA_OSS_DEBUG");

@@ -496,7 +496,7 @@ static int open_pcm(oss_dsp_t *dsp, const char *name, unsigned int pcm_mode,
 	return result;
 }
 
-static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
+static int oss_dsp_open(int card, int device, int oflag, mode_t mode ATTRIBUTE_UNUSED)
 {
 	oss_dsp_t *dsp;
 	unsigned int pcm_mode = 0;
