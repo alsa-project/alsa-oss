@@ -1,6 +1,6 @@
-check_PROGRAMS=mmap_test lmixer
+check_PROGRAMS=osstest lmixer
 
-mmap_test_LDADD=../oss-redir/libossredir.la
+osstest_LDADD=../oss-redir/libossredir.la
 lmixer_LDADD=../oss-redir/libossredir.la
 lmixer_SOURCES=lmixer.cc
 
