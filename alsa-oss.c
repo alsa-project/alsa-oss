@@ -92,15 +92,15 @@ static ops_t ops[FD_CLASSES];
 typedef struct {
 	snd_pcm_t *pcm;
 	size_t frame_bytes;
-	size_t period_size;
-	size_t periods;
-	size_t buffer_size;
+	snd_pcm_uframes_t period_size;
+	unsigned int periods;
+	snd_pcm_uframes_t buffer_size;
 	size_t bytes;
-	size_t boundary;
-	size_t old_hw_ptr;
+	snd_pcm_uframes_t boundary;
+	snd_pcm_uframes_t old_hw_ptr;
 	unsigned int mmap:1,
 		     disabled:1;
-	size_t mmap_size;
+	size_t mmap_bytes;
 } oss_dsp_stream_t;
 
 typedef struct {
@@ -190,7 +190,7 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 			continue;
 		snd_pcm_hw_params_any(pcm, &hw);
 		if (str->mmap) {
-			err = snd_pcm_hw_param_max(pcm, &hw, SND_PCM_HW_PARAM_BUFFER_BYTES, str->mmap_size, 0);
+			err = snd_pcm_hw_param_max(pcm, &hw, SND_PCM_HW_PARAM_BUFFER_BYTES, str->mmap_bytes, 0);
 			if (err < 0)
 				return err;
 			err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_MMAP_INTERLEAVED, 0);
@@ -416,7 +416,7 @@ static ssize_t oss_dsp_write(int fd, const void *buf, size_t n)
 	oss_dsp_t *dsp = fds[fd].private;
 	oss_dsp_stream_t *str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 	snd_pcm_t *pcm = str->pcm;
-	size_t frames;
+	snd_pcm_uframes_t frames;
 	if (!pcm) {
 		errno = EBADFD;
 		result = -1;
@@ -451,7 +451,7 @@ static ssize_t oss_dsp_read(int fd, void *buf, size_t n)
 	oss_dsp_t *dsp = fds[fd].private;
 	oss_dsp_stream_t *str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 	snd_pcm_t *pcm = str->pcm;
-	size_t frames;
+	snd_pcm_uframes_t frames;
 	if (!pcm) {
 		errno = EBADFD;
 		result = -1;
@@ -719,7 +719,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	}
 	case SNDCTL_DSP_GETISPACE:
 	{
-		ssize_t avail, delay;
+		snd_pcm_sframes_t avail, delay;
 		audio_buf_info *info = arg;
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 		pcm = str->pcm;
@@ -746,7 +746,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	}
 	case SNDCTL_DSP_GETOSPACE:
 	{
-		ssize_t avail, delay;
+		snd_pcm_sframes_t avail, delay;
 		audio_buf_info *info = arg;
 		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 		pcm = str->pcm;
@@ -773,8 +773,8 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	}
 	case SNDCTL_DSP_GETIPTR:
 	{
-		ssize_t avail, delay;
-		size_t hw_ptr;
+		snd_pcm_sframes_t avail, delay;
+		snd_pcm_uframes_t hw_ptr;
 		count_info *info = arg;
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 		pcm = str->pcm;
@@ -817,8 +817,8 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	}
 	case SNDCTL_DSP_GETOPTR:
 	{
-		ssize_t avail, delay;
-		size_t hw_ptr;
+		snd_pcm_sframes_t avail, delay;
+		snd_pcm_uframes_t hw_ptr;
 		count_info *info = arg;
 		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 		pcm = str->pcm;
@@ -861,7 +861,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	}
 	case SNDCTL_DSP_GETODELAY:
 	{
-		ssize_t delay;
+		snd_pcm_sframes_t delay;
 		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 		pcm = str->pcm;
 		if (!pcm) {
@@ -981,7 +981,7 @@ static void *oss_dsp_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUS
 	if (!str->pcm)
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 	str->mmap = 1;
-	str->mmap_size = len;
+	str->mmap_bytes = len;
 	err = oss_dsp_params(dsp);
 	if (err < 0) {
 		errno = -err;
@@ -1004,7 +1004,7 @@ static int oss_dsp_munmap(int fd, void *addr ATTRIBUTE_UNUSED, size_t len ATTRIB
 	if (!str->pcm)
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 	str->mmap = 0;
-	str->mmap_size = 0;
+	str->mmap_bytes = 0;
 	err = oss_dsp_params(dsp);
 	if (err < 0) {
 		errno = -err;
