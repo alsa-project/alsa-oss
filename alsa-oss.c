@@ -545,7 +545,7 @@ static int oss_mixer_open(int card, int device, int oflag, mode_t mode ATTRIBUTE
 		return -1;
 	}
 	fds[fd]->private = mixer;
-	result = snd_mixer_open(&mixer->mix);
+	result = snd_mixer_open(&mixer->mix, 0);
 	if (result < 0)
 		goto _error;
 	result = snd_mixer_attach(mixer->mix, name);
