@@ -356,6 +356,8 @@ static int oss_dsp_close(int fd)
 		oss_dsp_stream_t *str = &dsp->streams[k];
 		if (!str->pcm)
 			continue;
+		if (k == SND_PCM_STREAM_PLAYBACK)
+			snd_pcm_drain(str->pcm);
 		err = snd_pcm_close(str->pcm);
 		if (err < 0)
 			result = err;
