@@ -1056,7 +1056,6 @@ int close(int fd)
 	int result = _close(fd);
 	if (result < 0 || fd < 0 || fd >= open_max || !fds[fd])
 		return result;
-	printf("close %d %d\n", fd, fds[fd]->count);
 	if (--fds[fd]->count == 0) {
 		int err;
 		err = ops[fds[fd]->class].close(fd);
