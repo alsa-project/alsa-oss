@@ -113,16 +113,17 @@ typedef struct {
 	oss_dsp_stream_t streams[2];
 } oss_dsp_t;
 
-typedef enum { FD_OSS_DSP = 0, FD_DEFAULT = -1, FD_CLOSED = -2 } fd_class_t;
+typedef enum { FD_OSS_DSP = 0 } fd_class_t;
 
 typedef struct {
+	int count;
 	fd_class_t class;
 	void *private;
 	void *mmap_area;
 } fd_t;
 
 static int open_max;
-static fd_t *fds;
+static fd_t **fds;
 
 #define RETRY open_max
 #define OSS_MAJOR 14
@@ -281,7 +282,7 @@ static int oss_dsp_close(int fd)
 {
 	int result = 0;
 	int k;
-	oss_dsp_t *dsp = fds[fd].private;
+	oss_dsp_t *dsp = fds[fd]->private;
 	for (k = 0; k < 2; ++k) {
 		int err;
 		oss_dsp_stream_t *str = &dsp->streams[k];
@@ -347,13 +348,16 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 	}
 	fd = _open("/dev/null", oflag & O_ACCMODE);
 	assert(fd >= 0);
-	fds[fd].class = FD_OSS_DSP;
+	fds[fd] = malloc(sizeof(fd_t));
+	fds[fd]->class = FD_OSS_DSP;
 	dsp = calloc(1, sizeof(oss_dsp_t));
 	if (!dsp) {
 		errno = -ENOMEM;
 		return -1;
 	}
-	fds[fd].private = dsp;
+	fds[fd]->private = dsp;
+	fds[fd]->count = 1;
+	fds[fd]->mmap_area = NULL;
 	dsp->channels = 1;
 	dsp->rate = 8000;
 	dsp->format = format;
@@ -398,7 +402,9 @@ static int oss_open(const char *file, int oflag, ...)
 	case OSS_DEVICE_DSPW:
 	case OSS_DEVICE_AUDIO:
 	case OSS_DEVICE_ADSP:
-		return oss_dsp_open(card, device, oflag, mode);
+		result = oss_dsp_open(card, device, oflag, mode);
+		DEBUG("open(\"%s\", %d, %d) -> %d\n", file, oflag, mode, result);
+		return result;
 	default:
 		return RETRY;
 	}
@@ -407,7 +413,7 @@ static int oss_open(const char *file, int oflag, ...)
 static ssize_t oss_dsp_write(int fd, const void *buf, size_t n)
 {
 	ssize_t result;
-	oss_dsp_t *dsp = fds[fd].private;
+	oss_dsp_t *dsp = fds[fd]->private;
 	oss_dsp_stream_t *str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 	snd_pcm_t *pcm = str->pcm;
 	snd_pcm_uframes_t frames;
@@ -442,7 +448,7 @@ static ssize_t oss_dsp_write(int fd, const void *buf, size_t n)
 static ssize_t oss_dsp_read(int fd, void *buf, size_t n)
 {
 	ssize_t result;
-	oss_dsp_t *dsp = fds[fd].private;
+	oss_dsp_t *dsp = fds[fd]->private;
 	oss_dsp_stream_t *str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 	snd_pcm_t *pcm = str->pcm;
 	snd_pcm_uframes_t frames;
@@ -479,7 +485,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	int result, err;
 	va_list args;
 	void *arg;
-	oss_dsp_t *dsp = fds[fd].private;
+	oss_dsp_t *dsp = fds[fd]->private;
 	oss_dsp_stream_t *str;
 	snd_pcm_t *pcm;
 
@@ -942,7 +948,7 @@ static int oss_dsp_fcntl(int fd, int cmd, ...)
 		int k;
 		int err;
 		snd_pcm_t *pcm;
-		oss_dsp_t *dsp = fds[fd].private;
+		oss_dsp_t *dsp = fds[fd]->private;
 		DEBUG("F_SETFL, %ld)\n", arg);
 		for (k = 0; k < 2; ++k) {
 			pcm = dsp->streams[k].pcm;
@@ -969,7 +975,7 @@ static void *oss_dsp_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUS
 {
 	int err;
 	void *result;
-	oss_dsp_t *dsp = fds[fd].private;
+	oss_dsp_t *dsp = fds[fd]->private;
 	oss_dsp_stream_t *str;
 	str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 	if (!str->pcm)
@@ -991,7 +997,7 @@ static void *oss_dsp_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUS
 static int oss_dsp_munmap(int fd, void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUSED)
 {
 	int err;
-	oss_dsp_t *dsp = fds[fd].private;
+	oss_dsp_t *dsp = fds[fd]->private;
 	oss_dsp_stream_t *str;
 	DEBUG("munmap(%p, %lu)\n", addr, (unsigned long)len);
 	str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
@@ -1036,48 +1042,50 @@ int open(const char *file, int oflag, ...)
 		if (!ops[k].open)
 			continue;
 		fd = ops[k].open(file, oflag, mode);
-		if (fd != RETRY)
-			goto _end;
+		if (fd != RETRY) {
+			if (fd >= 0)
+				fds[fd]->count++;
+			return fd;
+		}
 	}
 	fd = _open(file, oflag, mode);
-	if (fd >= 0) {
-		if (fds[fd].class != FD_CLOSED) {
-			_close(fd);
-			errno = EMFILE;
-			return -1;
-		}
-		fds[fd].class = FD_DEFAULT;
-	}
- _end:
+	if (fd >= 0)
+		assert(!fds[fd]);
 	return fd;
 }
 
 int close(int fd)
 {
-	int result;
-	if (fd < 0 || fd >= open_max || fds[fd].class < 0)
+	int result = 0;
+	if (fd < 0 || fd >= open_max || !fds[fd] || fds[fd]->count > 1) {
 		result = _close(fd);
-	else
-		result = ops[fds[fd].class].close(fd);
-	if (result >= 0)
-		fds[fd].class = FD_CLOSED;
+	} else {
+		fd_t *f = fds[fd];
+		fds[fd] = 0;
+		f->count--;
+		if (f->count == 0) {
+			result = ops[f->class].close(fd);
+			assert(result >= 0);
+			free(f);
+		}
+	}
 	return result;
 }
 
 ssize_t write(int fd, const void *buf, size_t n)
 {
-	if (fd < 0 || fd >= open_max || fds[fd].class < 0)
+	if (fd < 0 || fd >= open_max || !fds[fd])
 		return _write(fd, buf, n);
 	else
-		return ops[fds[fd].class].write(fd, buf, n);
+		return ops[fds[fd]->class].write(fd, buf, n);
 }
 
 ssize_t read(int fd, void *buf, size_t n)
 {
-	if (fd < 0 || fd >= open_max || fds[fd].class < 0)
+	if (fd < 0 || fd >= open_max || !fds[fd])
 		return _read(fd, buf, n);
 	else
-		return ops[fds[fd].class].read(fd, buf, n);
+		return ops[fds[fd]->class].read(fd, buf, n);
 }
 
 int ioctl(int fd, unsigned long request, ...)
@@ -1088,10 +1096,10 @@ int ioctl(int fd, unsigned long request, ...)
 	va_start(args, request);
 	arg = va_arg(args, void *);
 	va_end(args);
-	if (fd < 0 || fd >= open_max || fds[fd].class < 0)
+	if (fd < 0 || fd >= open_max || !fds[fd])
 		return _ioctl(fd, request, arg);
 	else 
-		return ops[fds[fd].class].ioctl(fd, request, arg);
+		return ops[fds[fd]->class].ioctl(fd, request, arg);
 }
 
 int fcntl(int fd, int cmd, ...)
@@ -1102,20 +1110,20 @@ int fcntl(int fd, int cmd, ...)
 	va_start(args, cmd);
 	arg = va_arg(args, void *);
 	va_end(args);
-	if (fd < 0 || fd >= open_max || fds[fd].class < 0)
+	if (fd < 0 || fd >= open_max || !fds[fd])
 		return _fcntl(fd, cmd, arg);
 	else
-		return ops[fds[fd].class].fcntl(fd, cmd, arg);
+		return ops[fds[fd]->class].fcntl(fd, cmd, arg);
 }
 
 void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
 {
 	void *result;
-	if (fd < 0 || fd >= open_max || fds[fd].class < 0)
+	if (fd < 0 || fd >= open_max || !fds[fd])
 		return _mmap(addr, len, prot, flags, fd, offset);
-	result = ops[fds[fd].class].mmap(addr, len, prot, flags, fd, offset);
+	result = ops[fds[fd]->class].mmap(addr, len, prot, flags, fd, offset);
 	if (result != NULL && result != MAP_FAILED)
-		fds[fd].mmap_area = result;
+		fds[fd]->mmap_area = result;
 	return result;
 }
 
@@ -1128,14 +1136,14 @@ int munmap(void *addr, size_t len)
 		return _munmap(addr, len);
 #endif
 	for (fd = 0; fd < open_max; ++fd) {
-		if (fds[fd].mmap_area == addr)
+		if (fds[fd]->mmap_area == addr)
 			break;
 	}
-	if (fd >= open_max || fds[fd].class < 0)
+	if (fd >= open_max || !fds[fd])
 		return _munmap(addr, len);
 	else {
-		fds[fd].mmap_area = 0;
-		return ops[fds[fd].class].munmap(fd, addr, len);
+		fds[fd]->mmap_area = 0;
+		return ops[fds[fd]->class].munmap(fd, addr, len);
 	}
 }
 
@@ -1205,12 +1213,12 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 	for (k = 0; k < nfds; ++k) {
 		int fd = pfds[k].fd;
 		pfds[k].revents = 0;
-		if (fd >= open_max)
+		if (fd >= open_max || !fds[fd])
 			goto _std1;
-		switch (fds[fd].class) {
+		switch (fds[fd]->class) {
 		case FD_OSS_DSP:
 		{
-			oss_dsp_t *dsp = fds[fd].private;
+			oss_dsp_t *dsp = fds[fd]->private;
 			oss_dsp_stream_t *str;
 			int j;
 			for (j = 0; j < 2; ++j) {
@@ -1252,12 +1260,12 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 	for (k = 0; k < nfds; ++k) {
 		int fd = pfds[k].fd;
 		unsigned int revents;
-		if (fd >= open_max)
+		if (fd >= open_max || !fds[fd])
 			goto _std2;
-		switch (fds[fd].class) {
+		switch (fds[fd]->class) {
 		case FD_OSS_DSP:
 		{
-			oss_dsp_t *dsp = fds[fd].private;
+			oss_dsp_t *dsp = fds[fd]->private;
 			oss_dsp_stream_t *str;
 			int j;
 			revents = 0;
@@ -1321,10 +1329,12 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 		int e = (efds && FD_ISSET(fd, efds));
 		if (!(r || w || e))
 			continue;
-		switch (fds[fd].class) {
+		if (!fds[fd])
+			continue;
+		switch (fds[fd]->class) {
 		case FD_OSS_DSP:
 		{
-			oss_dsp_t *dsp = fds[fd].private;
+			oss_dsp_t *dsp = fds[fd]->private;
 			oss_dsp_stream_t *str;
 			int j;
 			if (r)
@@ -1384,10 +1394,12 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 		int r1, w1, e1;
 		if (!(r || w || e))
 			continue;
-		switch (fds[fd].class) {
+		if (!fds[fd])
+			continue;
+		switch (fds[fd]->class) {
 		case FD_OSS_DSP:
 		{
-			oss_dsp_t *dsp = fds[fd].private;
+			oss_dsp_t *dsp = fds[fd]->private;
 			oss_dsp_stream_t *str;
 			int j;
 			r1 = w1 = e1 = 0;
@@ -1480,7 +1492,6 @@ static void initialize() __attribute__ ((constructor));
 
 static void initialize()
 {
-	int k;
 	char *s = getenv("ALSA_OSS_DEBUG");
 	if (s)
 		debug = 1;
@@ -1500,12 +1511,5 @@ static void initialize()
 	_munmap = dlsym(RTLD_NEXT, "munmap");
 	_select = dlsym(RTLD_NEXT, "select");
 	_poll = dlsym(RTLD_NEXT, "poll");
-	for (k = 0; k < open_max; ++k) {
-		fds[k].private = 0;
-		if (_fcntl(k, F_GETFL) < 0)
-			fds[k].class = FD_CLOSED;
-		else
-			fds[k].class = FD_DEFAULT;
-	}
 }
 
