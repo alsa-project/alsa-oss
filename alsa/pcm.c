@@ -1,6 +1,7 @@
 /*
  *  OSS -> ALSA compatibility layer
- *  Copyright (c) by Abramo Bagnara <abramo@alsa-project.org>
+ *  Copyright (c) by Abramo Bagnara <abramo@alsa-project.org>,
+ *		     Jaroslav Kysela <perex@suse.cz>
  *
  *
  *   This program is free software; you can redistribute it and/or modify
@@ -45,6 +46,7 @@ snd_output_t *alsa_oss_debug_out = NULL;
 
 typedef struct {
 	snd_pcm_t *pcm;
+	snd_pcm_sw_params_t *sw_params;
 	size_t frame_bytes;
 	struct {
 		snd_pcm_uframes_t period_size;
@@ -344,6 +346,7 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 		str->oss.boundary = (0x3fffffff / str->oss.buffer_size) * str->oss.buffer_size;
 		str->alsa.appl_ptr = 0;
 		str->alsa.old_hw_ptr = 0;
+		str->mmap_advance = str->oss.period_size;
 	}
 	return 0;
 }
@@ -358,7 +361,7 @@ static int oss_dsp_sw_params(oss_dsp_t *dsp)
 		int err;
 		if (!pcm)
 			continue;
-		snd_pcm_sw_params_alloca(&sw);
+		sw = str->sw_params;
 		snd_pcm_sw_params_current(pcm, sw);
 		snd_pcm_sw_params_set_xfer_align(pcm, sw, 1);
 		snd_pcm_sw_params_set_start_threshold(pcm, sw, 
@@ -520,10 +523,8 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 	}
 	dsp = calloc(1, sizeof(oss_dsp_t));
 	if (!dsp) {
-		close(fd);
-		free(xfd);
-		errno = ENOMEM;
-		return -1;
+		result = -ENOMEM;
+		goto _error;
 	}
 	xfd->dsp = dsp;
 	dsp->channels = 1;
@@ -533,6 +534,9 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 	for (k = 0; k < 2; ++k) {
 		if (!(streams & (1 << k)))
 			continue;
+		result = snd_pcm_sw_params_malloc(&dsp->streams[k].sw_params);
+		if (result < 0)
+			goto _error;
 		result = snd_pcm_open(&dsp->streams[k].pcm, name, k, pcm_mode);
 		if (result < 0) {
 			if (k == 1 && dsp->streams[0].pcm != NULL) {
@@ -572,7 +576,16 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 	return fd;
 
  _error:
+	for (k = 0; k < 2; ++k) {
+		if (dsp->streams[k].pcm)
+			snd_pcm_close(dsp->streams[k].pcm);
+		if (dsp->streams[k].sw_params)
+			snd_pcm_sw_params_free(dsp->streams[k].sw_params);
+	}
 	close(fd);
+	if (xfd->dsp)
+		free(xfd->dsp);
+	free(xfd);
 	errno = -result;
 	return -1;
 }
@@ -696,11 +709,15 @@ static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
 	switch (stream) {
 	case SND_PCM_STREAM_PLAYBACK:
 		if (delay < 0) {
-			snd_pcm_reset(pcm);
 			str->mmap_advance -= delay;
 			if (str->mmap_advance > dsp->rate / 10)
 				str->mmap_advance = dsp->rate / 10;
-//			fprintf(stderr, "mmap_advance=%ld\n", str->mmap_advance);
+			//fprintf(stderr, "mmap_advance=%ld\n", str->mmap_advance);
+			err = snd_pcm_forward(pcm, -delay);
+			if (err >= 0) {
+				str->alsa.appl_ptr += err;
+				str->alsa.appl_ptr %= str->alsa.boundary;
+			}
 		}
 #if USE_REWIND
 		err = snd_pcm_rewind(pcm, str->alsa.buffer_size);
@@ -712,8 +729,7 @@ static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
 			str->alsa.appl_ptr %= str->alsa.boundary;
 			size = str->mmap_advance;
 		}
-//		fprintf(stderr, "delay=%ld rewind=%ld forward=%ld\n",
-//			delay, err, size);
+		//fprintf(stderr, "delay=%ld rewind=%ld forward=%ld\n", delay, err, size);
 #else
 		size = str->mmap_advance - delay;
 #endif
@@ -724,7 +740,8 @@ static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
 			if (frames == 0)
 				break;
 //			fprintf(stderr, "copy %ld %ld %d\n", ofs, frames, dsp->format);
-			snd_pcm_areas_copy(areas, ofs, str->mmap_areas, ofs, 
+			snd_pcm_areas_copy(areas, ofs, str->mmap_areas,
+					   str->alsa.appl_ptr % str->oss.buffer_size, 
 					   dsp->channels, frames,
 					   dsp->format);
 			err = snd_pcm_mmap_commit(pcm, ofs, frames);
@@ -736,6 +753,36 @@ static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
 		}
 		break;
 	case SND_PCM_STREAM_CAPTURE:
+		if (delay > (snd_pcm_sframes_t)str->alsa.buffer_size) {
+			err = snd_pcm_forward(pcm, delay - str->alsa.buffer_size);
+			if (err >= 0) {
+				str->alsa.appl_ptr += err;
+				str->alsa.appl_ptr %= str->alsa.boundary;
+				size = str->alsa.buffer_size;
+			} else {
+				size = delay;
+			}
+		} else {
+			size = delay;
+		}
+		while (size > 0) {
+			snd_pcm_uframes_t ofs;
+			snd_pcm_uframes_t frames = size;
+			snd_pcm_mmap_begin(pcm, &areas, &ofs, &frames);
+			if (frames == 0)
+				break;
+			snd_pcm_areas_copy(str->mmap_areas,
+					   str->alsa.appl_ptr % str->oss.buffer_size,
+					   areas, ofs,
+					   dsp->channels, frames,
+					   dsp->format);
+			err = snd_pcm_mmap_commit(pcm, ofs, frames);
+			if (err < 0)
+				break;
+			size -= err;
+			str->alsa.appl_ptr += err;
+			str->alsa.appl_ptr %= str->alsa.boundary;
+		}
 		break;
 	}
 }
@@ -1324,6 +1371,24 @@ int lib_oss_pcm_munmap(void *addr, size_t len)
 	return 0;
 }
 
+static void set_oss_mmap_avail_min(oss_dsp_stream_t *str, int stream ATTRIBUTE_UNUSED, snd_pcm_t *pcm)
+{
+	snd_pcm_uframes_t hw_ptr;
+	snd_pcm_sframes_t diff;
+
+	hw_ptr = str->alsa.old_hw_ptr - 
+		   (str->alsa.old_hw_ptr % str->oss.period_size) +
+		   str->oss.period_size;
+	diff = hw_ptr - str->alsa.appl_ptr;
+	if (diff < 0)
+		diff += str->alsa.buffer_size;
+	if (diff < 0)
+		diff = 1;
+	//fprintf(stderr, "avail_min (%i): hw_ptr = %lu, appl_ptr = %lu, diff = %lu\n", stream, hw_ptr, str->alsa.appl_ptr, diff);
+	snd_pcm_sw_params_set_avail_min(pcm, str->sw_params, diff);
+	snd_pcm_sw_params(pcm, str->sw_params);
+}
+
 int lib_oss_pcm_select_prepare(int fd, int fmode, fd_set *readfds, fd_set *writefds, fd_set *exceptfds)
 {
 	oss_dsp_t *dsp = look_for_dsp(fd);
@@ -1342,6 +1407,8 @@ int lib_oss_pcm_select_prepare(int fd, int fmode, fd_set *readfds, fd_set *write
 			continue;
 		if ((fmode & O_ACCMODE) == O_WRONLY && snd_pcm_stream(pcm) == SND_PCM_STREAM_CAPTURE)
 			continue;
+		if (dsp->mmap_buffer)
+			set_oss_mmap_avail_min(&dsp->streams[k], k, pcm);
 		count = snd_pcm_poll_descriptors_count(pcm);
 		if (count < 0) {
 			errno = -count;
@@ -1478,6 +1545,8 @@ int lib_oss_pcm_poll_prepare(int fd, int fmode, struct pollfd *ufds)
 			continue;
 		if ((fmode & O_ACCMODE) == O_WRONLY && snd_pcm_stream(pcm) == SND_PCM_STREAM_CAPTURE)
 			continue;
+		if (dsp->mmap_buffer)
+			set_oss_mmap_avail_min(&dsp->streams[k], k, pcm);
 		count = snd_pcm_poll_descriptors_count(pcm);
 		if (count < 0) {
 			errno = -count;
