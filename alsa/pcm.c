@@ -71,6 +71,7 @@ typedef struct {
 } oss_dsp_stream_t;
 
 typedef struct {
+	int hwset;
 	unsigned int channels;
 	unsigned int rate;
 	unsigned int oss_format;
@@ -391,9 +392,11 @@ static int oss_dsp_sw_params(oss_dsp_t *dsp)
 static int oss_dsp_params(oss_dsp_t *dsp)
 {
 	int err;
+	dsp->hwset = 0;
 	err = oss_dsp_hw_params(dsp);
 	if (err < 0) 
 		return err;
+	dsp->hwset = 1;
 	err = oss_dsp_sw_params(dsp);
 	if (err < 0) 
 		return err;
@@ -725,11 +728,10 @@ static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
 					   dsp->channels, frames,
 					   dsp->format);
 			err = snd_pcm_mmap_commit(pcm, ofs, frames);
-			assert(err == (snd_pcm_sframes_t) frames);
 			if (err < 0)
 				break;
-			size -= frames;
-			str->alsa.appl_ptr += frames;
+			size -= err;
+			str->alsa.appl_ptr += err;
 			str->alsa.appl_ptr %= str->alsa.boundary;
 		}
 		break;
@@ -764,6 +766,10 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 	{
 		int k;
 		DEBUG("SNDCTL_DSP_RESET)\n");
+		if (!dsp->hwset) {
+			errno = -EIO;
+			return -1;
+		}
 		result = 0;
 		for (k = 0; k < 2; ++k) {
 			str = &dsp->streams[k];
@@ -787,6 +793,10 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 	{
 		int k;
 		DEBUG("SNDCTL_DSP_SYNC)\n");
+		if (!dsp->hwset) {
+			errno = -EIO;
+			return -1;
+		}
 		result = 0;
 		for (k = 0; k < 2; ++k) {
 			str = &dsp->streams[k];
