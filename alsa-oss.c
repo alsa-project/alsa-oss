@@ -199,8 +199,6 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 		err = snd_pcm_strategy_simple_near(strategy, 1, SND_PCM_HW_INFO_FRAGMENT_LENGTH,
 						   frag_length, 1);
 		assert(err >= 0);
-		err = snd_pcm_strategy_simple_near(strategy, 2, SND_PCM_HW_INFO_BUFFER_LENGTH,
-						   1000000, 1);
 		err = snd_pcm_hw_info_strategy(pcm, &info, strategy);
 		snd_pcm_strategy_free(strategy);
 		if (err < 0)
