@@ -73,6 +73,8 @@ int (*_fcntl)(int fd, int cmd, ...);
 void *(*_mmap)(void *addr, size_t len, int prot, int flags, int fd, off_t offset);
 int (*_munmap)(void* addr, size_t len);
 
+FILE *(*_fopen)(const char *path, const char *mode);
+
 typedef struct ops {
 	int (*close)(int fd);
 	ssize_t (*write)(int fd, const void *buf, size_t n);
@@ -630,6 +632,24 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 	return count1;
 }
 
+static int is_sound_device(const char *pathname)
+{
+	if(!pathname) return 0;
+	if(strncmp(pathname,"/dev/dsp",8) == 0) return 1;
+	if(strncmp(pathname,"/dev/sound/dsp",14) == 0) return 1;
+	return 0;
+}
+
+
+#include "stdioemu.c"
+
+FILE *fopen(const char* path, const char *mode) {
+	if(!is_sound_device(path)) 
+		return _fopen (path, mode);
+	
+	return fake_fopen(path, mode);
+}
+
 #if 1
 # define strong_alias(name, aliasname) \
   extern __typeof (name) aliasname __attribute__ ((alias (#name)));
@@ -643,6 +663,7 @@ strong_alias(mmap, __mmap);
 strong_alias(munmap, __munmap);
 strong_alias(poll, __poll);
 strong_alias(select, __select);
+strong_alias(fopen, __fopen);
 #else
 int dup(int fd)
 {
@@ -712,4 +733,5 @@ static void initialize()
 	_munmap = dlsym(RTLD_NEXT, "munmap");
 	_select = dlsym(RTLD_NEXT, "select");
 	_poll = dlsym(RTLD_NEXT, "poll");
+	_fopen = dlsym(RTLD_NEXT, "fopen");
 }

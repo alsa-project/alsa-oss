@@ -5,6 +5,7 @@ EXTRA_DIST = aoss.1
 
 noinst_HEADERS = alsa-oss-emul.h alsa-local.h
 
+EXTRA_libaoss_la_SOURCES = stdioemu.c
 libaoss_la_SOURCES = alsa-oss.c
 libaoss_la_LIBADD = libalsatoss.la
 
