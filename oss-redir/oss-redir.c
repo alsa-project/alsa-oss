@@ -217,8 +217,10 @@ static void initialize(void)
 	if (s) {
 		strncpy(hal, s, sizeof(hal));
 		hal[sizeof(hal)-1] = '\0';
-		if (!strcmp(hal, "oss"))
+		if (!strcasecmp(hal, "oss"))
 			native_oss = 1;
+		else
+			native_oss = 0;
 	} else {
 		native_oss = 1;
 	}
