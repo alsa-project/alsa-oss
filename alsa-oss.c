@@ -100,6 +100,7 @@ typedef struct {
 	size_t old_hw_ptr;
 	unsigned int mmap:1,
 		     disabled:1;
+	size_t mmap_size;
 } oss_dsp_stream_t;
 
 typedef struct {
@@ -188,9 +189,12 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 		if (!pcm)
 			continue;
 		snd_pcm_hw_params_any(pcm, &hw);
-		if (str->mmap)
+		if (str->mmap) {
+			err = snd_pcm_hw_params_max(pcm, &hw, SND_PCM_HW_PARAM_BUFFER_BYTES, str->mmap_size);
+			if (err < 0)
+				return err;
 			err = snd_pcm_hw_params_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_MMAP_INTERLEAVED);
-		else
+		} else
 			err = snd_pcm_hw_params_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_RW_INTERLEAVED);
 		if (err < 0)
 			return err;
@@ -966,6 +970,7 @@ static void *oss_dsp_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUS
 	if (!str->pcm)
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 	str->mmap = 1;
+	str->mmap_size = len;
 	err = oss_dsp_params(dsp);
 	if (err < 0) {
 		errno = -err;
@@ -988,6 +993,7 @@ static int oss_dsp_munmap(int fd, void *addr ATTRIBUTE_UNUSED, size_t len ATTRIB
 	if (!str->pcm)
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 	str->mmap = 0;
+	str->mmap_size = 0;
 	err = oss_dsp_params(dsp);
 	if (err < 0) {
 		errno = -err;
