@@ -1,0 +1,39 @@
+Open Sound System call redirector
+=================================
+
+The purpose of this little piece of code is to redirect
+OSS (Open Sound System) calls to any shared library to avoid
+overhead caused with the LD_PRELOAD wrapper. Especially, 
+wrapping select() and poll() functions cause big overhead.
+
+In ideal world, all OSS programs will use this little code
+to allow a sound emulation for OSS based APIs without requirement
+of ugly LD_PRELOAD hacks.
+
+Usage
+=====
+
+Set environment variable OSS_REDIRECTOR to name of dynamic library
+with lib_oss_* public functions. For example (ALSA):
+
+export OSS_REDIRECTOR=libalsatoss.so
+
+If this variable is not set, or this value is "oss" or "OSS",
+the direct system calls are used.
+
+Porting OSS application to use this code
+========================================
+
+All functions have equivalent as using syscalls. Only one exception
+is select() or poll() usage. It is required to use oss_pcm_select*()
+or oss_pcm_poll*() wrappers to determine the "real" used file
+descriptors and mangle back the result.
+
+Note that the *prepare() functions returns the count of file
+descriptors allocated (poll) or the maximum used file descriptor
+(select).
+
+Porting example
+===============
+
+FIXME: Add a link to a good patch.
