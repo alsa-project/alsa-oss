@@ -50,10 +50,10 @@ ssize_t (*oss_pcm_write)(int fd, const void *buf, size_t count);
 void * (*oss_pcm_mmap)(void *start, size_t length, int prot, int flags, int fd, off_t offset);
 int (*oss_pcm_munmap)(void *start, size_t length);
 int (*oss_pcm_ioctl)(int fd, unsigned long int request, ...);
-int (*oss_pcm_select_prepare)(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds);
+int (*oss_pcm_select_prepare)(int fd, int fmode, fd_set *readfds, fd_set *writefds, fd_set *exceptfds);
 int (*oss_pcm_select_result)(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds);
 int (*oss_pcm_poll_fds)(int fd);
-int (*oss_pcm_poll_prepare)(int fd, struct pollfd *ufds);
+int (*oss_pcm_poll_prepare)(int fd, int fmode, struct pollfd *ufds);
 int (*oss_pcm_poll_result)(int fd, struct pollfd *ufds);
 
 static int (*x_oss_mixer_open)(const char *pathname, int flags);
@@ -75,21 +75,21 @@ static int native_pcm_nonblock(int fd, int nonblock)
 	return 0;
 }
 
-static int native_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds)
+static int native_pcm_select_prepare(int fd, int fmode, fd_set *readfds, fd_set *writefds, fd_set *exceptfds)
 {
 	if (fd < 0)
 		return -EINVAL;
-	if (readfds) {
+	if ((fmode & O_ACCMODE) != O_WRONLY && readfds) {
 		FD_SET(fd, readfds);
 		if (exceptfds)
 			FD_SET(fd, exceptfds);
 	}
-	if (writefds) {
+	if ((fmode & O_ACCMODE) != O_RDONLY && writefds) {
 		FD_SET(fd, writefds);
 		if (exceptfds)
 			FD_SET(fd, exceptfds);
 	}
-	return 0;
+	return fd;
 }
 
 static int native_pcm_select_result(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds)
@@ -114,13 +114,14 @@ static int native_pcm_poll_fds(int fd)
 	return 1;
 }
 
-static int native_pcm_poll_prepare(int fd, struct pollfd *ufds)
+static int native_pcm_poll_prepare(int fd, int fmode, struct pollfd *ufds)
 {
 	if (fd < 0)
 		return -EINVAL;
 	ufds->fd = fd;
-	ufds->events = POLLIN | POLLOUT | POLLERR;
-	return 0;
+	ufds->events = ((fmode & O_ACCMODE) == O_WRONLY ? 0 : POLLIN) |
+		       ((fmode & O_ACCMODE) == O_RDONLY ? 0 : POLLOUT) | POLLERR;
+	return 1;
 }
 
 static int native_pcm_poll_result(int fd, struct pollfd *ufds)

@@ -41,10 +41,10 @@ extern ssize_t (*oss_pcm_write)(int fd, const void *buf, size_t count);
 extern void * (*oss_pcm_mmap)(void *start, size_t length, int prot, int flags, int fd, off_t offset);
 extern int (*oss_pcm_munmap)(void *start, size_t length);
 extern int (*oss_pcm_ioctl)(int fd, unsigned long int request, ...);
-extern int (*oss_pcm_select_prepare)(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds);
+extern int (*oss_pcm_select_prepare)(int fd, int fmode, fd_set *readfds, fd_set *writefds, fd_set *exceptfds);
 extern int (*oss_pcm_select_result)(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds);
 extern int (*oss_pcm_poll_fds)(int fd);
-extern int (*oss_pcm_poll_prepare)(int fd, struct pollfd *ufds);
+extern int (*oss_pcm_poll_prepare)(int fd, int fmode, struct pollfd *ufds);
 extern int (*oss_pcm_poll_result)(int fd, struct pollfd *ufds);
 
 extern int oss_mixer_open(const char *pathname, int flags, ...);

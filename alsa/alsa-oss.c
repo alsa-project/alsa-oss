@@ -72,6 +72,7 @@ static ops_t ops[FD_CLASSES];
 
 typedef struct {
 	fd_class_t class;
+	int oflags;
 	void *mmap_area;
 } fd_t;
 
@@ -90,6 +91,8 @@ static int oss_pcm_fcntl(int fd, int cmd, ...)
 	va_end(args);
 
 	switch (cmd) {
+	case F_GETFL:
+		return fds[fd]->oflags;
         case F_SETFL:
 		result = lib_oss_pcm_nonblock(fd, (arg & O_NONBLOCK) ? 1 : 0);
                 if (result < 0) {
@@ -119,6 +122,8 @@ static int oss_mixer_fcntl(int fd, int cmd, ...)
 	va_end(args);
 
 	switch (cmd) {
+	case F_GETFL:
+		return fds[fd]->oflags;
 	default:
 		DEBUG("mixer_fcntl(%d, ", fd);
 		result = _fcntl(fd, cmd, arg);
@@ -200,6 +205,7 @@ int open(const char *file, int oflag, ...)
 				return -1;
 			}
 			fds[fd]->class = FD_OSS_DSP;
+			fds[fd]->oflags = oflag;
 			poll_fds_add += lib_oss_pcm_poll_fds(fd);
 		}
 	} else if (!strncmp(file, "/dev/mixer", 10)) {
@@ -212,6 +218,7 @@ int open(const char *file, int oflag, ...)
 				return -1;
 			}
 			fds[fd]->class = FD_OSS_MIXER;
+			fds[fd]->oflags = oflag;
 		}
 	} else {
 		fd = _open(file, oflag, mode);
@@ -376,8 +383,15 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 		switch (fds[fd]->class) {
 		case FD_OSS_DSP:
 		{
-			lib_oss_pcm_poll_prepare(fd, &pfds1[nfds1]);
-			nfds1 += lib_oss_pcm_poll_fds(fd);
+			unsigned short events = pfds[k].events;
+			int fmode = 0;
+			if (events & (POLLIN|POLLOUT))
+				fmode = O_RDWR;
+			else if (events & POLLIN)
+				fmode = O_RDONLY;
+			else
+				fmode = O_WRONLY;
+			nfds1 += lib_oss_pcm_poll_prepare(fd, fmode, &pfds1[nfds1]);
 			direct = 0;
 			break;
 		}
@@ -454,21 +468,25 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 	int count, count1;
 	int fd;
 	int direct = 1;
+
 	if (rfds) {
 		_rfds1 = *rfds;
-		rfds1 = &_rfds1;
-	} else
-		rfds1 = NULL;
+	} else {
+		FD_ZERO(&_rfds1);
+	}
+	rfds1 = &_rfds1;
 	if (wfds) {
 		_wfds1 = *wfds;
-		wfds1 = &_wfds1;
-	} else
-		wfds1 = NULL;
+	} else {
+		FD_ZERO(&_wfds1);
+	}
+	wfds1 = &_wfds1;
 	if (efds) {
 		_efds1 = *efds;
 		efds1 = &_efds1;
-	} else
+	} else {
 		efds1 = NULL;
+	}
 	for (fd = 0; fd < nfds; ++fd) {
 		int r = (rfds && FD_ISSET(fd, rfds));
 		int w = (wfds && FD_ISSET(fd, wfds));
@@ -480,9 +498,26 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 		switch (fds[fd]->class) {
 		case FD_OSS_DSP:
 		{
-			lib_oss_pcm_select_prepare(fd, r ? rfds1 : NULL,
-					               w ? wfds1 : NULL,
-					               e ? efds1 : NULL);
+			int res, fmode = 0;
+			
+			if (r & w)
+				fmode = O_RDWR;
+			else if (r)
+				fmode = O_RDONLY;
+			else
+				fmode = O_WRONLY;
+			res = lib_oss_pcm_select_prepare(fd, fmode, rfds1, wfds1,
+							 e ? efds1 : NULL);
+			if (res < 0)
+				return -1;
+			if (nfds1 < res + 1)
+				nfds1 = res + 1;
+			if (r)
+				FD_CLR(fd, rfds1);
+			if (w)
+				FD_CLR(fd, wfds1);
+			if (e)
+				FD_CLR(fd, efds1);
 			direct = 0;
 			break;
 		}
@@ -530,15 +565,19 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 			if (result < 0 && e) {
 				FD_SET(fd, efds);
 				e1 = 1;
-			} else if (result & OSS_WAIT_EVENT_ERROR) {
-				FD_SET(fd, efds);
-				e1 = 1;
-			} else if (result & OSS_WAIT_EVENT_READ) {
-				FD_SET(fd, rfds);
-				r1 = 1;
-			} else if (result & OSS_WAIT_EVENT_WRITE) {
-				FD_SET(fd, wfds);
-				w1 = 1;
+			} else {
+				if (result & OSS_WAIT_EVENT_ERROR) {
+					FD_SET(fd, efds);
+					e1 = 1;
+				}
+				if (result & OSS_WAIT_EVENT_READ) {
+					FD_SET(fd, rfds);
+					r1 = 1;
+				}
+				if (result & OSS_WAIT_EVENT_WRITE) {
+					FD_SET(fd, wfds);
+					w1 = 1;
+				}
 			}
 			break;
 		}

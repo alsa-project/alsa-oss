@@ -522,8 +522,14 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 		if (!(streams & (1 << k)))
 			continue;
 		result = snd_pcm_open(&dsp->streams[k].pcm, name, k, pcm_mode);
-		if (result < 0)
+		if (result < 0) {
+			if (k == 1 && dsp->streams[0].pcm != NULL) {
+				dsp->streams[1].pcm = NULL;
+				streams &= ~(1 << SND_PCM_STREAM_CAPTURE);
+				result = 0;
+			}
 			break;
+		}
 	}
 	if (result < 0) {
 		result = 0;
@@ -680,11 +686,14 @@ static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
 		}
 #if USE_REWIND
 		err = snd_pcm_rewind(pcm, str->alsa.buffer_size);
-		if (err < 0)
-			return;
-		size = str->mmap_advance;
-//		fprintf(stderr, "delay=%ld rewind=%ld forward=%ld offset=%ld\n",
-//			delay, err, size, snd_pcm_mmap_offset(pcm));
+		if (err < 0) {
+			/* fallback to not very accurate method */
+			size = str->mmap_advance - delay;
+		} else {
+			size = str->mmap_advance;
+		}
+//		fprintf(stderr, "delay=%ld rewind=%ld forward=%ld\n",
+//			delay, err, size);
 #else
 		size = str->mmap_advance - delay;
 #endif
@@ -692,6 +701,8 @@ static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
 			snd_pcm_uframes_t ofs;
 			snd_pcm_uframes_t frames = size;
 			snd_pcm_mmap_begin(pcm, &areas, &ofs, &frames);
+			if (frames == 0)
+				break;
 //			fprintf(stderr, "copy %ld %ld %d\n", ofs, frames, dsp->format);
 			snd_pcm_areas_copy(areas, ofs, str->mmap_areas, ofs, 
 					   dsp->channels, frames,
@@ -1027,6 +1038,7 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 				oss_dsp_mmap_update(dsp, SND_PCM_STREAM_CAPTURE, delay);
 		}
 		/* FIXME */
+		snd_pcm_avail_update(pcm);
 		hw_ptr = _snd_pcm_mmap_hw_ptr(pcm);
 		info->bytes = hw_ptr;
 		info->bytes *= str->frame_bytes;
@@ -1066,6 +1078,7 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 				oss_dsp_mmap_update(dsp, SND_PCM_STREAM_PLAYBACK, delay);
 		}
 		/* FIXME */
+		snd_pcm_avail_update(pcm);
 		hw_ptr = _snd_pcm_mmap_hw_ptr(pcm);
 		info->bytes = hw_ptr;
 		info->bytes *= str->frame_bytes;
@@ -1264,10 +1277,10 @@ int lib_oss_pcm_munmap(void *addr, size_t len)
 	return 0;
 }
 
-int lib_oss_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds)
+int lib_oss_pcm_select_prepare(int fd, int fmode, fd_set *readfds, fd_set *writefds, fd_set *exceptfds)
 {
 	oss_dsp_t *dsp = look_for_dsp(fd);
-	int k;
+	int k, maxfd = -1;
 
 	if (dsp == NULL) {
 		errno = EBADFD;
@@ -1277,6 +1290,10 @@ int lib_oss_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds, fd_set
 		snd_pcm_t *pcm = dsp->streams[k].pcm;
 		int err, count;
 		if (!pcm)
+			continue;
+		if ((fmode & O_ACCMODE) == O_RDONLY && snd_pcm_stream(pcm) == SND_PCM_STREAM_PLAYBACK)
+			continue;
+		if ((fmode & O_ACCMODE) == O_WRONLY && snd_pcm_stream(pcm) == SND_PCM_STREAM_CAPTURE)
 			continue;
 		count = snd_pcm_poll_descriptors_count(pcm);
 		if (count < 0) {
@@ -1294,6 +1311,8 @@ int lib_oss_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds, fd_set
 			for (j = 0; j < count; j++) {
 				int fd = ufds[j].fd;
 				unsigned short events = ufds[j].events;
+				if (maxfd < fd)
+					maxfd = fd;
 				if (readfds) {
 					FD_CLR(fd, readfds);
 					if (events & POLLIN)
@@ -1312,7 +1331,7 @@ int lib_oss_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds, fd_set
 			}
 		}
 	}	
-	return 0;
+	return maxfd;
 }
 
 int lib_oss_pcm_select_result(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds)
@@ -1363,7 +1382,7 @@ int lib_oss_pcm_select_result(int fd, fd_set *readfds, fd_set *writefds, fd_set 
 				result |= OSS_WAIT_EVENT_ERROR;
 			if (revents & POLLIN)
 				result |= OSS_WAIT_EVENT_READ;
-			if (revents & POLLIN)
+			if (revents & POLLOUT)
 				result |= OSS_WAIT_EVENT_WRITE;
 		}
 	}	
@@ -1394,10 +1413,10 @@ extern int lib_oss_pcm_poll_fds(int fd)
 	return result;
 }
 
-int lib_oss_pcm_poll_prepare(int fd, struct pollfd *ufds)
+int lib_oss_pcm_poll_prepare(int fd, int fmode, struct pollfd *ufds)
 {
 	oss_dsp_t *dsp = look_for_dsp(fd);
-	int k;
+	int k, result = 0;
 
 	if (dsp == NULL) {
 		errno = EBADFD;
@@ -1407,6 +1426,10 @@ int lib_oss_pcm_poll_prepare(int fd, struct pollfd *ufds)
 		snd_pcm_t *pcm = dsp->streams[k].pcm;
 		int err, count;
 		if (!pcm)
+			continue;
+		if ((fmode & O_ACCMODE) == O_RDONLY && snd_pcm_stream(pcm) == SND_PCM_STREAM_PLAYBACK)
+			continue;
+		if ((fmode & O_ACCMODE) == O_WRONLY && snd_pcm_stream(pcm) == SND_PCM_STREAM_CAPTURE)
 			continue;
 		count = snd_pcm_poll_descriptors_count(pcm);
 		if (count < 0) {
@@ -1419,8 +1442,9 @@ int lib_oss_pcm_poll_prepare(int fd, struct pollfd *ufds)
 			return -1;
 		}
 		ufds += count;
+		result += count;
 	}	
-	return 0;
+	return result;
 }
 
 int lib_oss_pcm_poll_result(int fd, struct pollfd *ufds)

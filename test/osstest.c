@@ -25,6 +25,7 @@ static audio_buf_info ispace;
 static int bufsize;
 static int fragsize;
 static char *wbuf, *rbuf;
+static int loop = 40;
 
 static void help(void)
 {
@@ -155,13 +156,14 @@ int main(int argc, char *argv[])
 		{"rate", 1, NULL, 'r'},
 		{"channels", 1, NULL, 'c'},
 		{"frag", 1, NULL, 'F'},
+		{"loop", 1, NULL, 'L'},
                 {NULL, 0, NULL, 0},
         };
 
         morehelp = 0;
 	while (1) {
 		int c;
-		if ((c = getopt_long(argc, argv, "hD:M:r:c:F:v", long_option, NULL)) < 0)
+		if ((c = getopt_long(argc, argv, "hD:M:r:c:F:L:v", long_option, NULL)) < 0)
 			break;
 		switch (c) {
 		case 'h':
@@ -187,6 +189,9 @@ int main(int argc, char *argv[])
 		case 'F':
 			frag = atoi(optarg);
 			break;
+		case 'L':
+			loop = atoi(optarg);
+			break;
 		case 'v':
 			verbose = 1;
 			break;
@@ -208,17 +213,18 @@ int main(int argc, char *argv[])
 
 
 	nfrag = 0;
-	for (idx=0; idx<40; idx++) {
+	for (idx=0; idx<loop; idx++) {
 		struct count_info count;
-		int res;
+		int res, maxfd;
 
 		FD_ZERO(&writeset);
-		FD_SET(fd, &writeset);
+		FD_ZERO(&readset);
+		maxfd = oss_pcm_select_prepare(fd, omode, &readset, &writeset, NULL);
 
 		tim.tv_sec = 10;
-		tim.tv_usec= 0;
+		tim.tv_usec = 0;
 
-		res = select(fd+1, NULL, &writeset, NULL, &tim);
+		res = select(maxfd + 1, &readset, &writeset, NULL, &tim);
 #ifdef VERBOSE
 		printf("Select returned: %03d\n", res);
 		fflush(stdout);
