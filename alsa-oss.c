@@ -182,68 +182,69 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 	for (k = 1; k >= 0; --k) {
 		oss_dsp_stream_t *str = &dsp->streams[k];
 		snd_pcm_t *pcm = str->pcm;
-		snd_pcm_hw_params_t hw;
+		snd_pcm_hw_params_t *hw;
 		int format;
 		int err;
 		if (!pcm)
 			continue;
-		snd_pcm_hw_params_any(pcm, &hw);
+		snd_pcm_hw_params_alloca(&hw);
+		snd_pcm_hw_params_any(pcm, hw);
 		if (str->mmap) {
-			err = snd_pcm_hw_param_max(pcm, &hw, SND_PCM_HW_PARAM_BUFFER_BYTES, str->mmap_bytes, 0);
+			err = snd_pcm_hw_param_max(pcm, hw, SND_PCM_HW_PARAM_BUFFER_BYTES, str->mmap_bytes, 0);
 			if (err < 0)
 				return err;
-			err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_MMAP_INTERLEAVED, 0);
+			err = snd_pcm_hw_param_set(pcm, hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_MMAP_INTERLEAVED, 0);
 		} else
-			err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_RW_INTERLEAVED, 0);
+			err = snd_pcm_hw_param_set(pcm, hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_RW_INTERLEAVED, 0);
 		if (err < 0)
 			return err;
 		format = oss_format_to_alsa(dsp->format);
 
-		err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_FORMAT,
+		err = snd_pcm_hw_param_set(pcm, hw, SND_PCM_HW_PARAM_FORMAT,
 					   format, 0);
 		if (err < 0)
 			return err;
-		err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_CHANNELS,
+		err = snd_pcm_hw_param_set(pcm, hw, SND_PCM_HW_PARAM_CHANNELS,
 					   dsp->channels, 0);
 		if (err < 0)
 			return err;
 
-		err = snd_pcm_hw_param_setinteger(pcm, &hw, SND_PCM_HW_PARAM_PERIODS);
+		err = snd_pcm_hw_param_setinteger(pcm, hw, SND_PCM_HW_PARAM_PERIODS);
 		if (err < 0)
 			return err;
-		err = snd_pcm_hw_param_min(pcm, &hw, SND_PCM_HW_PARAM_PERIODS,
+		err = snd_pcm_hw_param_min(pcm, hw, SND_PCM_HW_PARAM_PERIODS,
 					   2, 0);
 		if (err < 0)
 			return err;
 		if (dsp->maxfrags > 0) {
-			err = snd_pcm_hw_param_max(pcm, &hw, SND_PCM_HW_PARAM_PERIODS,
+			err = snd_pcm_hw_param_max(pcm, hw, SND_PCM_HW_PARAM_PERIODS,
 						   dsp->maxfrags, 0);
 			if (err < 0)
 				return err;
 		}
-		err = snd_pcm_hw_param_near(pcm, &hw, SND_PCM_HW_PARAM_RATE,
+		err = snd_pcm_hw_param_near(pcm, hw, SND_PCM_HW_PARAM_RATE,
 					     dsp->rate, 0);
 		assert(err >= 0);
 		if (dsp->fragshift > 0)
-			err = snd_pcm_hw_param_near(pcm, &hw, SND_PCM_HW_PARAM_PERIOD_BYTES,
+			err = snd_pcm_hw_param_near(pcm, hw, SND_PCM_HW_PARAM_PERIOD_BYTES,
 						    1 << dsp->fragshift, 0);
 		else
-			err = snd_pcm_hw_param_near(pcm, &hw, SND_PCM_HW_PARAM_PERIOD_TIME,
+			err = snd_pcm_hw_param_near(pcm, hw, SND_PCM_HW_PARAM_PERIOD_TIME,
 						    250000, 0);
 		assert(err >= 0);
 
-		err = snd_pcm_hw_params(pcm, &hw);
+		err = snd_pcm_hw_params(pcm, hw);
 		if (err < 0)
 			return err;
 #if 0
 		if (debug)
 			snd_pcm_dump_setup(pcm, stderr);
 #endif
-		dsp->rate = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_RATE, 0);
+		dsp->rate = snd_pcm_hw_param_value(hw, SND_PCM_HW_PARAM_RATE, 0);
 		dsp->format = alsa_format_to_oss(format);
 		str->frame_bytes = snd_pcm_format_physical_width(format) * dsp->channels / 8;
-		str->period_size = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_PERIOD_SIZE, 0);
-		str->periods = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_PERIODS, 0);
+		str->period_size = snd_pcm_hw_param_value(hw, SND_PCM_HW_PARAM_PERIOD_SIZE, 0);
+		str->periods = snd_pcm_hw_param_value(hw, SND_PCM_HW_PARAM_PERIODS, 0);
 		str->buffer_size = str->periods * str->period_size;
 	}
 	return 0;
@@ -255,37 +256,38 @@ static int oss_dsp_sw_params(oss_dsp_t *dsp)
 	for (k = 1; k >= 0; --k) {
 		oss_dsp_stream_t *str = &dsp->streams[k];
 		snd_pcm_t *pcm = str->pcm;
-		snd_pcm_sw_params_t sw;
+		snd_pcm_sw_params_t *sw;
 		int err;
 		if (!pcm)
 			continue;
-		snd_pcm_sw_params_current(pcm, &sw);
-		snd_pcm_sw_param_set(pcm, &sw,
+		snd_pcm_sw_params_alloca(&sw);
+		snd_pcm_sw_params_current(pcm, sw);
+		snd_pcm_sw_param_set(pcm, sw,
 				     SND_PCM_SW_PARAM_XFER_ALIGN, 1);
-		snd_pcm_sw_param_set(pcm, &sw, 
+		snd_pcm_sw_param_set(pcm, sw, 
 				     SND_PCM_SW_PARAM_START_MODE, 
 				     str->disabled ? SND_PCM_START_EXPLICIT :
 				     SND_PCM_START_DATA);
 #if 1
-		snd_pcm_sw_param_set(pcm, &sw,
+		snd_pcm_sw_param_set(pcm, sw,
 				     SND_PCM_SW_PARAM_XRUN_MODE, 
 				     str->mmap ? SND_PCM_XRUN_NONE :
 				     SND_PCM_XRUN_STOP);
 #else
-		snd_pcm_sw_param_set(pcm, &sw,
+		snd_pcm_sw_param_set(pcm, sw,
 				     SND_PCM_SW_PARAM_XRUN_MODE, 
 				     SND_PCM_XRUN_NONE);
-		snd_pcm_sw_param_set(pcm, &sw,
+		snd_pcm_sw_param_set(pcm, sw,
 				     SND_PCM_SW_PARAM_SILENCE_THRESHOLD,
 				     str->period_size);
-		snd_pcm_sw_param_set(pcm, &sw,
+		snd_pcm_sw_param_set(pcm, sw,
 				     SND_PCM_SW_PARAM_SILENCE_SIZE,
 				     str->period_size);
 #endif
-		err = snd_pcm_sw_params(pcm, &sw);
+		err = snd_pcm_sw_params(pcm, sw);
 		if (err < 0)
 			return err;
-		str->boundary = sw.boundary;
+		str->boundary = _snd_pcm_boundary(pcm);
 	}
 	return 0;
 }
