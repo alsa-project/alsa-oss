@@ -92,8 +92,8 @@ static ops_t ops[FD_CLASSES];
 typedef struct {
 	snd_pcm_t *pcm;
 	size_t frame_bytes;
-	size_t fragment_size;
-	size_t fragments;
+	size_t period_size;
+	size_t periods;
 	size_t buffer_size;
 	size_t bytes;
 	size_t boundary;
@@ -190,32 +190,35 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 			continue;
 		snd_pcm_hw_params_any(pcm, &hw);
 		if (str->mmap) {
-			err = snd_pcm_hw_param_max(pcm, &hw, SND_PCM_HW_PARAM_BUFFER_BYTES, str->mmap_size);
+			err = snd_pcm_hw_param_max(pcm, &hw, SND_PCM_HW_PARAM_BUFFER_BYTES, str->mmap_size, 0);
 			if (err < 0)
 				return err;
-			err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_MMAP_INTERLEAVED);
+			err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_MMAP_INTERLEAVED, 0);
 		} else
-			err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_RW_INTERLEAVED);
+			err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_RW_INTERLEAVED, 0);
 		if (err < 0)
 			return err;
 		format = oss_format_to_alsa(dsp->format);
 
 		err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_FORMAT,
-					    format);
+					   format, 0);
 		if (err < 0)
 			return err;
 		err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_CHANNELS,
-					    dsp->channels);
+					   dsp->channels, 0);
 		if (err < 0)
 			return err;
 
-		err = snd_pcm_hw_param_min(pcm, &hw, SND_PCM_HW_PARAM_FRAGMENTS,
-					    2);
+		err = snd_pcm_hw_param_setinteger(pcm, &hw, SND_PCM_HW_PARAM_PERIODS);
+		if (err < 0)
+			return err;
+		err = snd_pcm_hw_param_min(pcm, &hw, SND_PCM_HW_PARAM_PERIODS,
+					   2, 0);
 		if (err < 0)
 			return err;
 		if (dsp->maxfrags > 0) {
-			err = snd_pcm_hw_param_max(pcm, &hw, SND_PCM_HW_PARAM_FRAGMENTS,
-						   dsp->maxfrags);
+			err = snd_pcm_hw_param_max(pcm, &hw, SND_PCM_HW_PARAM_PERIODS,
+						   dsp->maxfrags, 0);
 			if (err < 0)
 				return err;
 		}
@@ -226,11 +229,11 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 		} else
 			frag_length = 250000;
 		err = snd_pcm_hw_param_near(pcm, &hw, SND_PCM_HW_PARAM_RATE,
-					     dsp->rate);
+					     dsp->rate, 0);
 		if (err < 0)
 			return err;
-		err = snd_pcm_hw_param_near(pcm, &hw, SND_PCM_HW_PARAM_FRAGMENT_LENGTH,
-					     frag_length);
+		err = snd_pcm_hw_param_near(pcm, &hw, SND_PCM_HW_PARAM_PERIOD_TIME,
+					    frag_length, 0);
 		if (err < 0)
 			return err;
 		if (err < 0)
@@ -242,12 +245,12 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 		if (debug)
 			snd_pcm_dump_setup(pcm, stderr);
 #endif
-		dsp->rate = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_RATE);
+		dsp->rate = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_RATE, 0);
 		dsp->format = alsa_format_to_oss(format);
 		str->frame_bytes = snd_pcm_format_physical_width(format) * dsp->channels / 8;
-		str->fragment_size = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_FRAGMENT_SIZE);
-		str->fragments = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_FRAGMENTS);
-		str->buffer_size = str->fragments * str->fragment_size;
+		str->period_size = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_PERIOD_SIZE, 0);
+		str->periods = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_PERIODS, 0);
+		str->buffer_size = str->periods * str->period_size;
 		snd_pcm_sw_params_current(pcm, &sw);
 		if (str->disabled)
 			snd_pcm_sw_param_set(pcm, &sw, 
@@ -263,14 +266,11 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 				     SND_PCM_SW_PARAM_XRUN_MODE, 
 				     SND_PCM_XRUN_NONE);
 		snd_pcm_sw_param_set(pcm, &sw,
-				     SND_PCM_SW_PARAM_SILENCE_MODE,
-				     SND_PCM_SILENCE_FRAGMENT);
-		snd_pcm_sw_param_set(pcm, &sw,
 				     SND_PCM_SW_PARAM_SILENCE_THRESHOLD,
-				     str->fragment_size);
+				     str->period_size);
 		snd_pcm_sw_param_set(pcm, &sw,
 				     SND_PCM_SW_PARAM_SILENCE_SIZE,
-				     str->fragment_size);
+				     str->period_size);
 #endif
 		err = snd_pcm_sw_params(pcm, &sw);
 		if (err < 0)
@@ -594,7 +594,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		if (!str->pcm)
 			str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 		pcm = str->pcm;
-		*(int *) arg = str->fragment_size * str->frame_bytes;
+		*(int *) arg = str->period_size * str->frame_bytes;
 		DEBUG("SNDCTL_DSP_GETBLKSIZE, %p) -> [%d]\n", arg, *(int *)arg);
 		return 0;
 	case SNDCTL_DSP_POST:
@@ -733,10 +733,10 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		avail = snd_pcm_avail_update(pcm);
 		if (avail < 0)
 			avail = 0;
-		info->fragsize = str->fragment_size * str->frame_bytes;
-		info->fragstotal = str->fragments;
+		info->fragsize = str->period_size * str->frame_bytes;
+		info->fragstotal = str->periods;
 		info->bytes = avail * str->frame_bytes;
-		info->fragments = avail / str->fragment_size;
+		info->fragments = avail / str->period_size;
 		DEBUG("SNDCTL_DSP_GETISPACE, %p) -> {%d, %d, %d, %d}\n", arg,
 		      info->fragments,
 		      info->fragstotal,
@@ -760,10 +760,10 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		avail = snd_pcm_avail_update(pcm);
 		if (avail < 0)
 			avail = str->buffer_size;
-		info->fragsize = str->fragment_size * str->frame_bytes;
-		info->fragstotal = str->fragments;
+		info->fragsize = str->period_size * str->frame_bytes;
+		info->fragstotal = str->periods;
 		info->bytes = avail * str->frame_bytes;
-		info->fragments = avail / str->fragment_size;
+		info->fragments = avail / str->period_size;
 		DEBUG("SNDCTL_DSP_GETOSPACE, %p) -> {%d %d %d %d}\n", arg,
 		      info->fragments,
 		      info->fragstotal,
@@ -802,13 +802,13 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		info->ptr = hw_ptr % str->buffer_size;
 		info->ptr *= str->frame_bytes;
 		if (str->mmap) {
-			ssize_t n = (hw_ptr / str->fragment_size) - (str->old_hw_ptr / str->fragment_size);
+			ssize_t n = (hw_ptr / str->period_size) - (str->old_hw_ptr / str->period_size);
 			if (n < 0)
-				n += str->boundary / str->fragment_size;
+				n += str->boundary / str->period_size;
 			info->blocks = n;
 			str->old_hw_ptr = hw_ptr;
 		} else
-			info->blocks = delay / str->fragment_size;
+			info->blocks = delay / str->period_size;
 		DEBUG("SNDCTL_DSP_GETIPTR, %p) -> {%d %d %d}\n", arg,
 		      info->bytes,
 		      info->blocks,
@@ -846,13 +846,13 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		info->ptr = hw_ptr % str->buffer_size;
 		info->ptr *= str->frame_bytes;
 		if (str->mmap) {
-			ssize_t n = (hw_ptr / str->fragment_size) - (str->old_hw_ptr / str->fragment_size);
+			ssize_t n = (hw_ptr / str->period_size) - (str->old_hw_ptr / str->period_size);
 			if (n < 0)
-				n += str->boundary / str->fragment_size;
+				n += str->boundary / str->period_size;
 			info->blocks = n;
 			str->old_hw_ptr = hw_ptr;
 		} else
-			info->blocks = delay / str->fragment_size;
+			info->blocks = delay / str->period_size;
 		DEBUG("SNDCTL_DSP_GETOPTR, %p) -> {%d %d %d}\n", arg,
 		      info->bytes,
 		      info->blocks,
