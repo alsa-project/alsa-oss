@@ -1023,6 +1023,8 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		avail = snd_pcm_avail_update(pcm);
 		if (avail < 0)
 			avail = 0;
+		if ((snd_pcm_uframes_t)avail > str->buffer_size)
+			avail = str->buffer_size;
 		info->fragsize = str->period_size * str->frame_bytes;
 		info->fragstotal = str->periods;
 		info->bytes = avail * str->frame_bytes;
@@ -1053,7 +1055,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 				oss_dsp_mmap_update(dsp, SND_PCM_STREAM_PLAYBACK, delay);
 		}
 		avail = snd_pcm_avail_update(pcm);
-		if (avail < 0)
+		if (avail < 0 || (snd_pcm_uframes_t)avail > str->buffer_size)
 			avail = str->buffer_size;
 		info->fragsize = str->period_size * str->frame_bytes;
 		info->fragstotal = str->periods;
