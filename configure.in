@@ -1,4 +1,4 @@
-AC_INIT(alsa-oss.c)
+AC_INIT(alsa/alsa-oss.c)
 AM_INIT_AUTOMAKE(alsa-oss, 1.0.2)
 
 AC_PREFIX_DEFAULT(/usr)
@@ -7,6 +7,21 @@ AC_PROG_CC
 AC_PROG_INSTALL
 AC_PROG_LN_S 
 AM_PROG_LIBTOOL
-AM_PATH_ALSA(0.9.0)
 
-AC_OUTPUT(Makefile aoss)
+dnl Check for aoss...
+AC_MSG_CHECKING(for aoss)
+AC_ARG_WITH(aoss,
+  [  --with-aoss=yes,no     OSS -> ALSA emulation library build],
+  with_aoss="$withval", with_aoss="yes")
+if test "$with_aoss" = "yes"; then
+  AC_MSG_RESULT(yes)
+else
+  AC_MSG_RESULT(no)
+fi
+AM_CONDITIONAL(WITH_AOSS, test x$with_aoss = xyes)
+
+if test "$with_aoss" = "yes"; then
+  AM_PATH_ALSA(0.9.0)
+fi
+
+AC_OUTPUT(Makefile alsa/Makefile alsa/aoss oss-redir/Makefile)

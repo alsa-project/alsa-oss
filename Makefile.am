@@ -1,14 +1,10 @@
-lib_LTLIBRARIES = libaoss.la
-bin_SCRIPTS = aoss
-man_MANS = aoss.1
-EXTRA_DIST = aoss.1
+if WITH_AOSS
+ALSA_DIR = alsa
+else
+ALSA_DIR =
+endif
 
-libaoss_la_SOURCES = alsa-oss.c
-libaoss_la_LIBADD = -ldl -lasound
-
-
-clean:
-	rm -f aoss
+SUBDIRS = $(ALSA_DIR) oss-redir
 
 dist-hook:
 	echo $(VERSION) >> version
