@@ -5,6 +5,7 @@ ALSA_DIR =
 endif
 
 SUBDIRS = $(ALSA_DIR) oss-redir test
+AUTOMAKE_OPTIONS = foreign
 
 dist-hook:
 	echo $(VERSION) >> version

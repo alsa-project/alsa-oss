@@ -7,7 +7,7 @@ lmixer_SOURCES=lmixer.cc
 noinst_HEADERS = mixctl.h
 
 INCLUDES=-I$(top_srcdir)/oss-redir
-CFLAGS=-static -Wall -pipe -g
+AM_CFLAGS=-static -Wall -pipe -g
 
 EXTRA_DIST=
 
