@@ -104,6 +104,26 @@ static int open_max;
 static int poll_fds_add = 0;
 static fd_t **fds;
 
+static int is_dsp_device(const char *pathname)
+{
+	if(!pathname) return 0;
+	if(strncmp(pathname,"/dev/dsp",8) == 0) return 1;
+	if(strncmp(pathname,"/dev/adsp",9) == 0) return 1;
+	if(strncmp(pathname,"/dev/audio",10) == 0) return 1;
+	if(strncmp(pathname,"/dev/sound/dsp",14) == 0) return 1;
+	if(strncmp(pathname,"/dev/sound/adsp",15) == 0) return 1;
+	if(strncmp(pathname,"/dev/sound/audio",16) == 0) return 1;
+	return 0;
+}
+
+static int is_mixer_device(const char *pathname)
+{
+	if(!pathname) return 0;
+	if(strncmp(pathname,"/dev/mixer",10) == 0) return 1;
+	if(strncmp(pathname,"/dev/sound/mixer",16) == 0) return 1;
+	return 0;
+}
+
 static int oss_pcm_fcntl(int fd, int cmd, ...)
 {
 	int result;
@@ -217,9 +237,7 @@ int open(const char *file, int oflag, ...)
 		mode = va_arg(args, mode_t);
 		va_end(args);
 	}
-	if (!strncmp(file, "/dev/dsp", 8) ||
-	    !strncmp(file, "/dev/adsp", 9) ||
-	    !strncmp(file, "/dev/audio", 10)) {
+	if (is_dsp_device(file)) {
 		fd = lib_oss_pcm_open(file, oflag);
 		if (fd >= 0) {
 			fds[fd] = calloc(sizeof(fd_t), 1);
@@ -232,7 +250,7 @@ int open(const char *file, int oflag, ...)
 			fds[fd]->oflags = oflag;
 			poll_fds_add += lib_oss_pcm_poll_fds(fd);
 		}
-	} else if (!strncmp(file, "/dev/mixer", 10)) {
+	} else if (is_mixer_device(file)) {
 		fd = lib_oss_mixer_open(file, oflag);
 		if (fd >= 0) {
 			fds[fd] = calloc(sizeof(fd_t), 1);
@@ -632,19 +650,11 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 	return count1;
 }
 
-static int is_sound_device(const char *pathname)
-{
-	if(!pathname) return 0;
-	if(strncmp(pathname,"/dev/dsp",8) == 0) return 1;
-	if(strncmp(pathname,"/dev/sound/dsp",14) == 0) return 1;
-	return 0;
-}
-
 
 #include "stdioemu.c"
 
 FILE *fopen(const char* path, const char *mode) {
-	if(!is_sound_device(path)) 
+	if(!is_dsp_device(path)) 
 		return _fopen (path, mode);
 	
 	return fake_fopen(path, mode);
