@@ -1668,10 +1668,10 @@ int munmap(void *addr, size_t len)
 void dump_poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 {
 	unsigned int k;
-	printf("POLL nfds: %ld, timeout: %d\n", nfds, timeout);
+	fprintf(stderr, "POLL nfds: %ld, timeout: %d\n", nfds, timeout);
 	for (k = 0; k < nfds; ++k) {
-		printf("fd=%d, events=%x, revents=%x\n", 
-		       pfds[k].fd, pfds[k].events, pfds[k].revents);
+		fprintf(stderr, "fd=%d, events=%x, revents=%x\n", 
+			pfds[k].fd, pfds[k].events, pfds[k].revents);
 	}
 }
 #endif
@@ -1681,40 +1681,40 @@ void dump_select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 		 struct timeval *timeout)
 {
 	int k;
-	printf("SELECT nfds: %d, ", nfds);
+	fprintf(stderr, "SELECT nfds: %d, ", nfds);
 	if (timeout)
-		printf("timeout: %ld.%06ld\n", timeout->tv_sec, timeout->tv_usec);
+		fprintf(stderr, "timeout: %ld.%06ld\n", timeout->tv_sec, timeout->tv_usec);
 	else
-		printf("no timeout\n");
+		fprintf(stderr, "no timeout\n");
 	if (rfds) {
-		printf("rfds: ");
+		fprintf(stderr, "rfds: ");
 		for (k = 0; k < nfds; ++k) {
 			if (FD_ISSET(k, rfds))
-				putchar('1');
+				putc('1', stderr);
 			else
-				putchar('0');
+				putc('0', stderr);
 		}
-		putchar('\n');
+		putc('\n', stderr);
 	}
 	if (wfds) {
-		printf("wfds: ");
+		fprintf(stderr, "wfds: ");
 		for (k = 0; k < nfds; ++k) {
 			if (FD_ISSET(k, wfds))
-				putchar('1');
+				putc('1', stderr);
 			else
-				putchar('0');
+				putc('0', stderr);
 		}
-		putchar('\n');
+		putc('\n', stderr);
 	}
 	if (efds) {
-		printf("efds: ");
+		fprintf(stderr, "efds: ");
 		for (k = 0; k < nfds; ++k) {
 			if (FD_ISSET(k, efds))
-				putchar('1');
+				putc('1', stderr);
 			else
-				putchar('0');
+				putc('0', stderr);
 		}
-		putchar('\n');
+		putc('\n', stderr);
 	}
 }
 #endif
@@ -1772,9 +1772,9 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 		return _poll(pfds, nfds, timeout);
 #ifdef DEBUG_POLL
 	if (debug) {
-		printf("Orig enter ");
+		fprintf(stderr, "Orig enter ");
 		dump_poll(pfds, nfds, timeout);
-		printf("Changed enter ");
+		fprintf(stderr, "Changed enter ");
 		dump_poll(pfds1, nfds1, timeout);
 	}
 #endif
@@ -1816,9 +1816,9 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 	}
 #ifdef DEBUG_POLL
 	if (debug) {
-		printf("Changed exit ");
+		fprintf(stderr, "Changed exit ");
 		dump_poll(pfds1, nfds1, timeout);
-		printf("Orig exit ");
+		fprintf(stderr, "Orig exit ");
 		dump_poll(pfds, nfds, timeout);
 	}
 #endif
@@ -1894,9 +1894,9 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 		return _select(nfds, rfds, wfds, efds, timeout);
 #ifdef DEBUG_SELECT
 	if (debug) {
-		printf("Orig enter ");
+		fprintf(stderr, "Orig enter ");
 		dump_select(nfds, rfds, wfds, efds, timeout);
-		printf("Changed enter ");
+		fprintf(stderr, "Changed enter ");
 		dump_select(nfds1, rfds1, wfds1, efds1, timeout);
 	}
 #endif
@@ -1960,9 +1960,9 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 	}
 #ifdef DEBUG_SELECT
 	if (debug) {
-		printf("Changed exit ");
+		fprintf(stderr, "Changed exit ");
 		dump_select(nfds1, rfds1, wfds1, efds1, timeout);
-		printf("Orig exit ");
+		fprintf(stderr, "Orig exit ");
 		dump_select(nfds, rfds, wfds, efds, timeout);
 	}
 #endif
