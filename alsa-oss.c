@@ -184,7 +184,6 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 		snd_pcm_hw_params_t hw;
 		snd_pcm_sw_params_t sw;
 		int format;
-		int frag_length;
 		int err;
 		if (!pcm)
 			continue;
@@ -222,22 +221,17 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 			if (err < 0)
 				return err;
 		}
-		if (dsp->fragshift > 0) {
-			frag_length = 1 << dsp->fragshift;
-			frag_length /= snd_pcm_format_physical_width(format) / 8;
-			frag_length = (u_int64_t) frag_length * 1000000 / dsp->rate;
-		} else
-			frag_length = 250000;
 		err = snd_pcm_hw_param_near(pcm, &hw, SND_PCM_HW_PARAM_RATE,
 					     dsp->rate, 0);
-		if (err < 0)
-			return err;
-		err = snd_pcm_hw_param_near(pcm, &hw, SND_PCM_HW_PARAM_PERIOD_TIME,
-					    frag_length, 0);
-		if (err < 0)
-			return err;
-		if (err < 0)
-			return err;
+		assert(err >= 0);
+		if (dsp->fragshift > 0)
+			err = snd_pcm_hw_param_near(pcm, &hw, SND_PCM_HW_PARAM_PERIOD_BYTES,
+						    1 << dsp->fragshift, 0);
+		else
+			err = snd_pcm_hw_param_near(pcm, &hw, SND_PCM_HW_PARAM_PERIOD_TIME,
+						    250000, 0);
+		assert(err >= 0);
+
 		err = snd_pcm_hw_params(pcm, &hw);
 		if (err < 0)
 			return err;
