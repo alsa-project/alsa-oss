@@ -194,33 +194,33 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 		snd_pcm_hw_params_any(pcm, hw);
 		if (str->mmap) {
 			snd_pcm_uframes_t max = str->mmap_bytes / str->frame_bytes;
-			err = snd_pcm_hw_params_set_buffer_size_max(pcm, hw, SND_CHANGE, &max);
+			err = snd_pcm_hw_params_set_buffer_size_max(pcm, hw, &max);
 			if (err < 0)
 				return err;
-			err = snd_pcm_hw_params_set_access(pcm, hw, SND_CHANGE, SND_PCM_ACCESS_MMAP_INTERLEAVED);
+			err = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_MMAP_INTERLEAVED);
 		} else
-			err = snd_pcm_hw_params_set_access(pcm, hw, SND_CHANGE, SND_PCM_ACCESS_RW_INTERLEAVED);
+			err = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED);
 		if (err < 0)
 			return err;
 		format = oss_format_to_alsa(dsp->format);
 
-		err = snd_pcm_hw_params_set_format(pcm, hw, SND_CHANGE, format);
+		err = snd_pcm_hw_params_set_format(pcm, hw, format);
 		if (err < 0)
 			return err;
-		err = snd_pcm_hw_params_set_channels(pcm, hw, SND_CHANGE, dsp->channels);
+		err = snd_pcm_hw_params_set_channels(pcm, hw, dsp->channels);
 		if (err < 0)
 			return err;
 
-		err = snd_pcm_hw_params_set_periods_integer(pcm, hw, SND_CHANGE);
+		err = snd_pcm_hw_params_set_periods_integer(pcm, hw);
 		if (err < 0)
 			return err;
 		periods_min = 2;
-		err = snd_pcm_hw_params_set_periods_min(pcm, hw, SND_CHANGE, &periods_min, 0);
+		err = snd_pcm_hw_params_set_periods_min(pcm, hw, &periods_min, 0);
 		if (err < 0)
 			return err;
 		if (dsp->maxfrags > 0) {
 			unsigned int periods_max = dsp->maxfrags;
-			err = snd_pcm_hw_params_set_periods_max(pcm, hw, SND_CHANGE,
+			err = snd_pcm_hw_params_set_periods_max(pcm, hw,
 								&periods_max, 0);
 			if (err < 0)
 				return err;
