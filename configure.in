@@ -9,4 +9,4 @@ AC_PROG_LN_S
 AM_PROG_LIBTOOL
 AM_PATH_ALSA(0.9.0)
 
-AC_OUTPUT(Makefile aoss.in)
+AC_OUTPUT(Makefile aoss)
