@@ -317,16 +317,15 @@ static int oss_dsp_sw_params(oss_dsp_t *dsp)
 		snd_pcm_sw_params_alloca(&sw);
 		snd_pcm_sw_params_current(pcm, sw);
 		snd_pcm_sw_params_set_xfer_align(pcm, sw, 1);
-		snd_pcm_sw_params_set_start_mode(pcm, sw, 
-						 str->stopped ? SND_PCM_START_EXPLICIT :
-						 SND_PCM_START_DATA);
+		snd_pcm_sw_params_set_start_threshold(pcm, sw, 
+						      str->stopped ? str->buffer_size + 1 : 1);
 #if 1
-		snd_pcm_sw_params_set_xrun_mode(pcm, sw,
-				     str->mmap_buffer ? SND_PCM_XRUN_NONE :
-				     SND_PCM_XRUN_STOP);
+		snd_pcm_sw_params_set_stop_threshold(pcm, sw,
+						     str->mmap_buffer ? LONG_MAX :
+						     str->buffer_size);
 #else
-		snd_pcm_sw_params_set_xrun_mode(pcm, sw,
-						SND_PCM_XRUN_NONE);
+		snd_pcm_sw_params_set_stop_threshold(pcm, sw,
+						     LONG_MAX);
 		snd_pcm_sw_params_set_silence_threshold(pcm, sw,
 						       str->period_size);
 		snd_pcm_sw_params_set_silence_size(pcm, sw,
@@ -724,7 +723,7 @@ static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
 	snd_pcm_t *pcm = str->pcm;
 	snd_pcm_sframes_t err;
 	snd_pcm_uframes_t size;
-	const snd_pcm_channel_area_t *areas = snd_pcm_mmap_areas(pcm);
+	const snd_pcm_channel_area_t *areas;
 	switch (stream) {
 	case SND_PCM_STREAM_PLAYBACK:
 		if (delay < 0) {
@@ -745,16 +744,14 @@ static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
 		size = str->mmap_advance - delay;
 #endif
 		while (size > 0) {
-			snd_pcm_uframes_t ofs = snd_pcm_mmap_offset(pcm);
+			snd_pcm_uframes_t ofs;
 			snd_pcm_uframes_t frames = size;
-			snd_pcm_uframes_t cont = str->buffer_size - ofs;
-			if (frames > cont)
-				frames = cont;
+			snd_pcm_mmap_begin(pcm, &areas, &ofs, &frames);
 //			fprintf(stderr, "copy %ld %ld %d\n", ofs, frames, dsp->format);
 			snd_pcm_areas_copy(areas, ofs, str->mmap_areas, ofs, 
 					   dsp->channels, frames,
 					   dsp->format);
-			err = snd_pcm_mmap_forward(pcm, frames);
+			err = snd_pcm_mmap_commit(pcm, ofs, frames);
 			assert(err == (snd_pcm_sframes_t) frames);
 			size -= frames;
 		}
@@ -980,11 +977,13 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 						break;
 					if (str->mmap_buffer) {
 						const snd_pcm_channel_area_t *areas;
-						areas = snd_pcm_mmap_areas(pcm);
+						snd_pcm_uframes_t offset;
+						snd_pcm_uframes_t size = str->buffer_size;
+						snd_pcm_mmap_begin(pcm, &areas, &offset, &size);
 						snd_pcm_areas_copy(areas, 0, str->mmap_areas, 0,
-								   dsp->channels, str->buffer_size,
+								   dsp->channels, size,
 								   dsp->format);
-						snd_pcm_mmap_forward(pcm, str->buffer_size);
+						snd_pcm_mmap_commit(pcm, offset, size);
 					}
 					err = snd_pcm_start(pcm);
 					if (err < 0)
