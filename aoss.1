@@ -1,0 +1,28 @@
+.TH AOSS 1 "3 October 2001"
+.SH NAME
+aoss \- Wrapper script to facilitate use of the ALSA OSS compatibility
+library.
+.SH SYNOPSYS
+\fBaoss\fP \fIosscommand\fP [arguments]
+
+.SH DESCRIPTION
+\fBaoss\fP is a simple wrapper script which facilitates the use of the
+ALSA OSS compatibility library. It just sets the appropriate LD_PRELOAD
+path and then runs the command.
+
+This is useful in cases where routing settings (which can be made in
+your .asoundrc file) need to be applied to commands that use the OSS
+API.
+
+.SS Arguments
+.TP
+\fIosscommand\fP
+A command that uses the OSS API
+.TP
+\fIarguments\fP
+The appropriate arguments and options for the OSS command.
+.TP
+
+.SH AUTHORS
+The OSS compatibility library is by Abramo Bagnara <abramo@alsa-project.org>
+The aoss script and this document are by James Tappin <james@xena.uklinux.net>
