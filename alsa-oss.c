@@ -38,12 +38,24 @@
 
 static int debug = 0;
 
+#if __GNUC__ > 2 || (__GNUC__ == 2 && __GNUC_MINOR__ >= 95)
+#define NEW_MACRO_VARARGS
+#endif
+
 #if 1
 #define DEBUG_POLL
 #define DEBUG_SELECT
+#ifdef NEW_MACRO_VARARGS
 #define DEBUG(...) do { if (debug) fprintf(stderr, __VA_ARGS__); } while (0)
+#else /* !NEW_MACRO_VARARGS */
+#define DEBUG(args...) do { if (debug) fprintf(stderr, ##args); } while (0)
+#endif
 #else
+#ifdef NEW_MACRO_VARARGS
 #define DEBUG(...)
+#else /* !NEW_MACRO_VARARGS */
+#define DEBUG(args...)
+#endif
 #endif
 
 int (*_select)(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
