@@ -28,6 +28,10 @@ pcm.dsp0 {
 	slave.pcm "dmix"
 }
 
+In the above configuration examples, the pcm.dsp0 definition is used to wrap calls do /dev/dsp0. You can also wrap usage of /dev/dsp1, /dev/dsp2, etc. by defining pcm.dsp1, pcm.dsp2, etc..
+
+In the current form, aoss is not able to wrap OSS applications that make use of libc's FILE* infrastructure (fopen() and friends) for their communication with the OSS sound driver. This is because libc uses internal versions of open() and friends which cannot be intercepted by LD_PRELOAD'ing a shared library..
+
 .SS Arguments
 .TP
 \fIosscommand\fP
