@@ -190,32 +190,32 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 			continue;
 		snd_pcm_hw_params_any(pcm, &hw);
 		if (str->mmap) {
-			err = snd_pcm_hw_params_max(pcm, &hw, SND_PCM_HW_PARAM_BUFFER_BYTES, str->mmap_size);
+			err = snd_pcm_hw_param_max(pcm, &hw, SND_PCM_HW_PARAM_BUFFER_BYTES, str->mmap_size);
 			if (err < 0)
 				return err;
-			err = snd_pcm_hw_params_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_MMAP_INTERLEAVED);
+			err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_MMAP_INTERLEAVED);
 		} else
-			err = snd_pcm_hw_params_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_RW_INTERLEAVED);
+			err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_RW_INTERLEAVED);
 		if (err < 0)
 			return err;
 		format = oss_format_to_alsa(dsp->format);
 
-		err = snd_pcm_hw_params_set(pcm, &hw, SND_PCM_HW_PARAM_FORMAT,
+		err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_FORMAT,
 					    format);
 		if (err < 0)
 			return err;
-		err = snd_pcm_hw_params_set(pcm, &hw, SND_PCM_HW_PARAM_CHANNELS,
+		err = snd_pcm_hw_param_set(pcm, &hw, SND_PCM_HW_PARAM_CHANNELS,
 					    dsp->channels);
 		if (err < 0)
 			return err;
 
-		err = snd_pcm_hw_params_min(pcm, &hw, SND_PCM_HW_PARAM_FRAGMENTS,
+		err = snd_pcm_hw_param_min(pcm, &hw, SND_PCM_HW_PARAM_FRAGMENTS,
 					    2);
 		if (err < 0)
 			return err;
 		if (dsp->maxfrags > 0) {
-			err = snd_pcm_hw_params_max(pcm, &hw, SND_PCM_HW_PARAM_FRAGMENTS,
-						    dsp->maxfrags);
+			err = snd_pcm_hw_param_max(pcm, &hw, SND_PCM_HW_PARAM_FRAGMENTS,
+						   dsp->maxfrags);
 			if (err < 0)
 				return err;
 		}
@@ -225,11 +225,11 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 			frag_length = (u_int64_t) frag_length * 1000000 / dsp->rate;
 		} else
 			frag_length = 250000;
-		err = snd_pcm_hw_params_near(pcm, &hw, SND_PCM_HW_PARAM_RATE,
+		err = snd_pcm_hw_param_near(pcm, &hw, SND_PCM_HW_PARAM_RATE,
 					     dsp->rate);
 		if (err < 0)
 			return err;
-		err = snd_pcm_hw_params_near(pcm, &hw, SND_PCM_HW_PARAM_FRAGMENT_LENGTH,
+		err = snd_pcm_hw_param_near(pcm, &hw, SND_PCM_HW_PARAM_FRAGMENT_LENGTH,
 					     frag_length);
 		if (err < 0)
 			return err;
@@ -242,25 +242,36 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 		if (debug)
 			snd_pcm_dump_setup(pcm, stderr);
 #endif
-		dsp->rate = snd_pcm_hw_params_value(&hw, SND_PCM_HW_PARAM_RATE);
+		dsp->rate = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_RATE);
 		dsp->format = alsa_format_to_oss(format);
 		str->frame_bytes = snd_pcm_format_physical_width(format) * dsp->channels / 8;
-		str->fragment_size = snd_pcm_hw_params_value(&hw, SND_PCM_HW_PARAM_FRAGMENT_SIZE);
-		str->fragments = snd_pcm_hw_params_value(&hw, SND_PCM_HW_PARAM_FRAGMENTS);
+		str->fragment_size = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_FRAGMENT_SIZE);
+		str->fragments = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_FRAGMENTS);
 		str->buffer_size = str->fragments * str->fragment_size;
+		snd_pcm_sw_params_current(pcm, &sw);
 		if (str->disabled)
-			sw.start_mode = SND_PCM_START_EXPLICIT;
-		else
-			sw.start_mode = SND_PCM_START_DATA;
+			snd_pcm_sw_param_set(pcm, &sw, 
+					     SND_PCM_SW_PARAM_START_MODE, 
+					     SND_PCM_START_EXPLICIT);
+#if 1
 		if (str->mmap)
-			sw.xrun_mode = SND_PCM_XRUN_NONE;
-		else
-			sw.xrun_mode = SND_PCM_XRUN_FRAGMENT;
-		sw.ready_mode = SND_PCM_READY_FRAGMENT;
-		sw.avail_min = str->fragment_size;
-		sw.xfer_min = 1;
-		sw.xfer_align = 1;
-		sw.time = 0;
+			snd_pcm_sw_param_set(pcm, &sw,
+					     SND_PCM_SW_PARAM_XRUN_MODE, 
+					     SND_PCM_XRUN_NONE);
+#else
+		snd_pcm_sw_param_set(pcm, &sw,
+				     SND_PCM_SW_PARAM_XRUN_MODE, 
+				     SND_PCM_XRUN_NONE);
+		snd_pcm_sw_param_set(pcm, &sw,
+				     SND_PCM_SW_PARAM_SILENCE_MODE,
+				     SND_PCM_SILENCE_FRAGMENT);
+		snd_pcm_sw_param_set(pcm, &sw,
+				     SND_PCM_SW_PARAM_SILENCE_THRESHOLD,
+				     str->fragment_size);
+		snd_pcm_sw_param_set(pcm, &sw,
+				     SND_PCM_SW_PARAM_SILENCE_SIZE,
+				     str->fragment_size);
+#endif
 		err = snd_pcm_sw_params(pcm, &sw);
 		if (err < 0)
 			return err;
