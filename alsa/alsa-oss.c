@@ -99,6 +99,9 @@ typedef struct {
 	void *mmap_area;
 } fd_t;
 
+static void initialize(void);
+static int initialized = 0;
+
 static int oss_wrapper_debug = 0;
 static int open_max;
 static int poll_fds_add = 0;
@@ -129,6 +132,9 @@ static int oss_pcm_fcntl(int fd, int cmd, ...)
 	int result;
 	va_list args;
 	long arg;
+
+	if (!initialized)
+		initialize();
 
 	va_start(args, cmd);
 	arg = va_arg(args, long);
@@ -232,6 +238,9 @@ int open(const char *file, int oflag, ...)
 	mode_t mode = 0;
 	int fd;
 
+	if (!initialized)
+		initialize();
+
 	if (oflag & O_CREAT) {
 		va_start(args, oflag);
 		mode = va_arg(args, mode_t);
@@ -272,6 +281,9 @@ int open(const char *file, int oflag, ...)
 
 int close(int fd)
 {
+	if (!initialized)
+		initialize();
+
 	if (fd < 0 || fd >= open_max || fds[fd] == NULL) {
 		return _close(fd);
 	} else {
@@ -288,6 +300,9 @@ int close(int fd)
 
 ssize_t write(int fd, const void *buf, size_t n)
 {
+	if (!initialized)
+		initialize();
+
 	if (fd < 0 || fd >= open_max || fds[fd] == NULL)
 		return _write(fd, buf, n);
 	else
@@ -296,6 +311,9 @@ ssize_t write(int fd, const void *buf, size_t n)
 
 ssize_t read(int fd, void *buf, size_t n)
 {
+	if (!initialized)
+		initialize();
+
 	if (fd < 0 || fd >= open_max || fds[fd] == NULL)
 		return _read(fd, buf, n);
 	else
@@ -306,6 +324,9 @@ int ioctl(int fd, unsigned long request, ...)
 {
 	va_list args;
 	void *arg;
+
+	if (!initialized)
+		initialize();
 
 	va_start(args, request);
 	arg = va_arg(args, void *);
@@ -333,6 +354,10 @@ int fcntl(int fd, int cmd, ...)
 void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
 {
 	void *result;
+
+	if (!initialized)
+		initialize();
+
 	if (fd < 0 || fd >= open_max || fds[fd] == NULL)
 		return _mmap(addr, len, prot, flags, fd, offset);
 	result = ops[fds[fd]->class].mmap(addr, len, prot, flags, fd, offset);
@@ -344,6 +369,10 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
 int munmap(void *addr, size_t len)
 {
 	int fd;
+
+	if (!initialized)
+		initialize();
+
 	for (fd = 0; fd < open_max; ++fd) {
 		if (fds[fd] && fds[fd]->mmap_area == addr)
 			break;
@@ -416,6 +445,10 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 	int count, count1;
 	int direct = 1;
 	struct pollfd pfds1[nfds + poll_fds_add + 16];
+
+	if (!initialized)
+		initialize();
+
 	nfds1 = 0;
 	for (k = 0; k < nfds; ++k) {
 		int fd = pfds[k].fd;
@@ -511,6 +544,9 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 	int count, count1;
 	int fd;
 	int direct = 1;
+
+	if (!initialized)
+		initialize();
 
 	if (rfds) {
 		_rfds1 = *rfds;
@@ -654,6 +690,10 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 #include "stdioemu.c"
 
 FILE *fopen(const char* path, const char *mode) {
+
+	if (!initialized)
+		initialize();
+
 	if(!is_dsp_device(path)) 
 		return _fopen (path, mode);
 	
@@ -744,4 +784,5 @@ static void initialize()
 	_select = dlsym(RTLD_NEXT, "select");
 	_poll = dlsym(RTLD_NEXT, "poll");
 	_fopen = dlsym(RTLD_NEXT, "fopen");
+	initialized = 1;
 }
