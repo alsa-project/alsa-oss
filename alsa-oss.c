@@ -36,7 +36,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <linux/soundcard.h>
-#include <sys/asoundlib.h>
+#include <alsa/asoundlib.h>
 
 snd_pcm_uframes_t _snd_pcm_boundary(snd_pcm_t *pcm);
 snd_pcm_uframes_t _snd_pcm_mmap_hw_ptr(snd_pcm_t *pcm);
