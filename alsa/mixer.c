@@ -548,6 +548,10 @@ int lib_oss_mixer_open(const char *file, int oflag, ...)
 			minor = (atoi(file + 10) << 4) | OSS_DEVICE_MIXER;
 		else if (!strncmp(file, "/dev/amixer", 11))
 			minor = (atoi(file + 11) << 4) | OSS_DEVICE_AMIXER;
+		else if (!strncmp(file, "/dev/sound/mixer", 16))
+			minor = (atoi(file + 16) << 4) | OSS_DEVICE_MIXER;
+		else if (!strncmp(file, "/dev/sound/amixer", 17))
+			minor = (atoi(file + 17) << 4) | OSS_DEVICE_AMIXER;
 		else {
 			errno = ENOENT;
 			return -1;

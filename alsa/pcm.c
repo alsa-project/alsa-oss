@@ -1651,6 +1651,14 @@ int lib_oss_pcm_open(const char *file, int oflag, ...)
 			minor = (atoi(file + 9) << 4) | OSS_DEVICE_ADSP;
 		else if (!strncmp(file, "/dev/audio", 10))
 			minor = (atoi(file + 10) << 4) | OSS_DEVICE_AUDIO;
+		else if (!strncmp(file, "/dev/sound/dsp", 14))
+			minor = (atoi(file + 14) << 4) | OSS_DEVICE_DSP;
+		else if (!strncmp(file, "/dev/sound/dspW", 15))
+			minor = (atoi(file + 15) << 4) | OSS_DEVICE_DSPW;
+		else if (!strncmp(file, "/dev/sound/adsp", 15))
+			minor = (atoi(file + 15) << 4) | OSS_DEVICE_ADSP;
+		else if (!strncmp(file, "/dev/sound/audio", 16))
+			minor = (atoi(file + 16) << 4) | OSS_DEVICE_AUDIO;
 		else {
 			errno = ENOENT;
 			return -1;

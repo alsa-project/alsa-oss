@@ -30,6 +30,8 @@ pcm.dsp0 {
 
 In the above configuration examples, the pcm.dsp0 definition is used to wrap calls do /dev/dsp0. You can also wrap usage of /dev/dsp1, /dev/dsp2, etc. by defining pcm.dsp1, pcm.dsp2, etc..
 
+Note on mmap: aoss mmap support might be buggy. Your results may vary when trying to use an application that uses mmap'ing to access the OSS device files.
+
 
 .SS Arguments
 .TP
