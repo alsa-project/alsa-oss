@@ -292,7 +292,6 @@ static int oss_dsp_close(int fd)
 		if (err < 0)
 			result = err;
 	}
-	_close(fd);
 	free(dsp);
 	if (result < 0) {
 		errno = -result;
@@ -348,7 +347,7 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 	}
 	fd = _open("/dev/null", oflag & O_ACCMODE);
 	assert(fd >= 0);
-	fds[fd] = malloc(sizeof(fd_t));
+	fds[fd] = calloc(1, sizeof(fd_t));
 	fds[fd]->class = FD_OSS_DSP;
 	dsp = calloc(1, sizeof(oss_dsp_t));
 	if (!dsp) {
@@ -356,8 +355,6 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 		return -1;
 	}
 	fds[fd]->private = dsp;
-	fds[fd]->count = 1;
-	fds[fd]->mmap_area = NULL;
 	dsp->channels = 1;
 	dsp->rate = 8000;
 	dsp->format = format;
@@ -1056,19 +1053,17 @@ int open(const char *file, int oflag, ...)
 
 int close(int fd)
 {
-	int result = 0;
-	if (fd < 0 || fd >= open_max || !fds[fd] || fds[fd]->count > 1) {
-		result = _close(fd);
-	} else {
-		fd_t *f = fds[fd];
-		fds[fd] = 0;
-		f->count--;
-		if (f->count == 0) {
-			result = ops[f->class].close(fd);
-			assert(result >= 0);
-			free(f);
-		}
+	int result = _close(fd);
+	if (result < 0 || fd < 0 || fd >= open_max || !fds[fd])
+		return result;
+	printf("close %d %d\n", fd, fds[fd]->count);
+	if (--fds[fd]->count == 0) {
+		int err;
+		err = ops[fds[fd]->class].close(fd);
+		assert(err >= 0);
+		free(fds[fd]);
 	}
+	fds[fd] = 0;
 	return result;
 }
 
@@ -1136,15 +1131,13 @@ int munmap(void *addr, size_t len)
 		return _munmap(addr, len);
 #endif
 	for (fd = 0; fd < open_max; ++fd) {
-		if (fds[fd]->mmap_area == addr)
+		if (fds[fd] && fds[fd]->mmap_area == addr)
 			break;
 	}
-	if (fd >= open_max || !fds[fd])
+	if (fd >= open_max)
 		return _munmap(addr, len);
-	else {
-		fds[fd]->mmap_area = 0;
-		return ops[fds[fd]->class].munmap(fd, addr, len);
-	}
+	fds[fd]->mmap_area = 0;
+	return ops[fds[fd]->class].munmap(fd, addr, len);
 }
 
 #ifdef DEBUG_POLL
