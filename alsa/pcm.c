@@ -237,6 +237,7 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 #endif
 
 		if (str->mmap_buffer) {
+			snd_pcm_uframes_t size;
 			snd_pcm_access_mask_t *mask;
 			snd_pcm_access_mask_alloca(&mask);
 			snd_pcm_access_mask_any(mask);
@@ -246,10 +247,12 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 			err = snd_pcm_hw_params_set_access_mask(pcm, hw, mask);
 			if (err < 0)
 				return err;
-			err = snd_pcm_hw_params_set_period_size(pcm, hw, str->alsa.mmap_period_bytes / str->frame_bytes, 0);
+			size = str->alsa.mmap_period_bytes / str->frame_bytes;
+			err = snd_pcm_hw_params_set_period_size_near(pcm, hw, &size, NULL);
 			if (err < 0)
 				return err;
-			err = snd_pcm_hw_params_set_buffer_size(pcm, hw, str->alsa.mmap_buffer_bytes / str->frame_bytes);
+			size = str->alsa.mmap_buffer_bytes / str->frame_bytes;
+			err = snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &size);
 			if (err < 0)
 				return err;
 			err = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_MMAP_INTERLEAVED);
@@ -316,12 +319,17 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 		err = snd_pcm_hw_params_get_buffer_size(hw, &str->alsa.buffer_size);
 		if (err < 0)
 			return err;
-		str->oss.buffer_size = 1 << ld2(str->alsa.buffer_size);
-		if (str->oss.buffer_size < str->alsa.buffer_size)
-			str->oss.buffer_size *= 2;
-		str->oss.period_size = 1 << ld2(str->alsa.period_size);
-		if (str->oss.period_size < str->alsa.period_size)
-			str->oss.period_size *= 2;
+		if (str->mmap_buffer == NULL) {
+			str->oss.buffer_size = 1 << ld2(str->alsa.buffer_size);
+			if (str->oss.buffer_size < str->alsa.buffer_size)
+				str->oss.buffer_size *= 2;
+			str->oss.period_size = 1 << ld2(str->alsa.period_size);
+			if (str->oss.period_size < str->alsa.period_size)
+				str->oss.period_size *= 2;
+		} else {
+			str->oss.buffer_size = str->alsa.mmap_period_bytes / str->frame_bytes;
+			str->oss.period_size = str->alsa.mmap_buffer_bytes / str->frame_bytes;
+		}
 		str->oss.periods = str->oss.buffer_size / str->oss.period_size;
 		if (str->mmap_areas)
 			free(str->mmap_areas);
@@ -754,7 +762,7 @@ static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
 					   dsp->channels, frames,
 					   dsp->format);
 			err = snd_pcm_mmap_commit(pcm, ofs, frames);
-			if (err < 0)
+			if (err <= 0)
 				break;
 			size -= err;
 			str->alsa.appl_ptr += err;
@@ -1345,6 +1353,8 @@ void * lib_oss_pcm_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUSED
 	err = oss_dsp_params(dsp);
 	if (err < 0) {
 		free(result);
+		str->mmap_buffer = NULL;
+		str->mmap_bytes = 0;
 		errno = -err;
 		result = MAP_FAILED;
 		goto _end;
@@ -1391,7 +1401,7 @@ static void set_oss_mmap_avail_min(oss_dsp_stream_t *str, int stream ATTRIBUTE_U
 	diff = hw_ptr - str->alsa.appl_ptr;
 	if (diff < 0)
 		diff += str->alsa.buffer_size;
-	if (diff < 0)
+	if (diff < 1)
 		diff = 1;
 	//fprintf(stderr, "avail_min (%i): hw_ptr = %lu, appl_ptr = %lu, diff = %lu\n", stream, hw_ptr, str->alsa.appl_ptr, diff);
 	snd_pcm_sw_params_set_avail_min(pcm, str->sw_params, diff);
