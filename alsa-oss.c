@@ -65,11 +65,6 @@ static int debug = 0;
 
 int (*_select)(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
 int (*_poll)(struct pollfd *ufds, unsigned int nfds, int timeout);
-
-/* Note that to do a fool proof job we need also to trap:
-   fopen, fdopen, freopen, fclose, fwrite, fread, etc.
-   I hope that no applications use stdio to access OSS devices */
-
 int (*_open)(const char *file, int oflag, ...);
 int (*_close)(int fd);
 ssize_t (*_write)(int fd, const void *buf, size_t n);
@@ -1774,11 +1769,6 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
 int munmap(void *addr, size_t len)
 {
 	int fd;
-#if 0
-	/* Tricky here: matches snd_pcm_munmap */
-	if (errno == 12345)
-		return _munmap(addr, len);
-#endif
 	for (fd = 0; fd < open_max; ++fd) {
 		if (fds[fd] && fds[fd]->mmap_area == addr)
 			break;
@@ -2094,7 +2084,20 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 	return count1;
 }
 
-
+#if 1
+# define strong_alias(name, aliasname) \
+  extern __typeof (name) aliasname __attribute__ ((alias (#name)));
+strong_alias(open, __open);
+strong_alias(close, __close);
+strong_alias(write, __write);
+strong_alias(read, __read);
+strong_alias(ioctl, __ioctl);
+strong_alias(fcntl, __fcntl);
+strong_alias(mmap, __mmap);
+strong_alias(munmap, __munmap);
+strong_alias(poll, __poll);
+strong_alias(select, __select);
+#else
 int dup(int fd)
 {
 	return fcntl(fd, F_DUPFD, 0);
@@ -2138,6 +2141,7 @@ int open64(const char *file, int oflag, ...)
 	}
 	return open(file, oflag | O_LARGEFILE, mode);
 }
+#endif
 
 static void initialize() __attribute__ ((constructor));
 
