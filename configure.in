@@ -1,5 +1,5 @@
 AC_INIT(alsa-oss.c)
-AM_INIT_AUTOMAKE(alsa-oss, 0.9.0beta9)
+AM_INIT_AUTOMAKE(alsa-oss, 0.9.0beta10)
 
 AC_PREFIX_DEFAULT(/usr)
 
