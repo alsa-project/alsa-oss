@@ -4,6 +4,8 @@ osstest_LDADD=../oss-redir/libossredir.la
 lmixer_LDADD=../oss-redir/libossredir.la
 lmixer_SOURCES=lmixer.cc
 
+noinst_HEADERS = mixctl.h
+
 INCLUDES=-I$(top_srcdir)/oss-redir
 CFLAGS=-static -Wall -pipe -g
 
