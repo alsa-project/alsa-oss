@@ -36,7 +36,7 @@
 #include <linux/soundcard.h>
 #include <sys/asoundlib.h>
 
-#if 0
+#if 1
 #define DEBUG_POLL
 #define DEBUG_SELECT
 #define debug(...) fprintf(stderr, __VA_ARGS__);
@@ -676,13 +676,17 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 		info->fragstotal = str->fragments;
 		info->bytes = avail * str->frame_bytes;
 		info->fragments = avail / str->fragment_size;
+		debug("SNDCTL_DSP_GETISPACE %d %d %d %d\n", 
+		      info->fragsize,
+		      info->fragstotal,
+		      info->bytes,
+		      info->fragments);
 		return 0;
 	}
 	case SNDCTL_DSP_GETOSPACE:
 	{
 		ssize_t avail, delay;
 		audio_buf_info *info = arg;
-		fprintf(stderr, "OSPACE\n");
 		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 		pcm = str->pcm;
 		if (!pcm) {
@@ -699,6 +703,11 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 		info->fragstotal = str->fragments;
 		info->bytes = avail * str->frame_bytes;
 		info->fragments = avail / str->fragment_size;
+		debug("SNDCTL_DSP_GETOSPACE %d %d %d %d\n", 
+		      info->fragsize,
+		      info->fragstotal,
+		      info->bytes,
+		      info->fragments);
 		return 0;
 	}
 	case SNDCTL_DSP_GETIPTR:
@@ -739,6 +748,10 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 			str->old_hw_ptr = hw_ptr;
 		} else
 			info->blocks = delay / str->fragment_size;
+		debug("SNDCTL_DSP_GETIPTR %d %d %d\n", 
+		      info->bytes,
+		      info->ptr,
+		      info->blocks);
 		return 0;
 	}
 	case SNDCTL_DSP_GETOPTR:
@@ -746,7 +759,6 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 		ssize_t avail, delay;
 		size_t hw_ptr;
 		count_info *info = arg;
-		fprintf(stderr, "OPTR\n");
 		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 		pcm = str->pcm;
 		if (!pcm) {
@@ -780,12 +792,15 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 			str->old_hw_ptr = hw_ptr;
 		} else
 			info->blocks = delay / str->fragment_size;
+		debug("SNDCTL_DSP_GETOPTR %d %d %d\n", 
+		      info->bytes,
+		      info->ptr,
+		      info->blocks);
 		return 0;
 	}
 	case SNDCTL_DSP_GETODELAY:
 	{
 		ssize_t delay;
-		fprintf(stderr, "ODELAY\n");
 		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 		pcm = str->pcm;
 		if (!pcm) {
@@ -796,23 +811,28 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 		    snd_pcm_delay(pcm, &delay) < 0)
 			delay = 0;
 		*(int *)arg = delay * str->frame_bytes;
+		debug("SNDCTL_DSP_GETODELAY %d\n", *(int*)arg); 
 		return 0;
 	}
 	case SNDCTL_DSP_SETDUPLEX:
+		debug("SNDCTL_DSP_SETDUPLEX\n"); 
 		return 0;
 	case SOUND_PCM_READ_RATE:
 	{
 		*(int *)arg = dsp->rate;
+		debug("SOUND_PCM_READ_RATE %d\n", *(int*)arg); 
 		return 0;
 	}
 	case SOUND_PCM_READ_CHANNELS:
 	{
 		*(int *)arg = dsp->channels;
+		debug("SOUND_PCM_READ_CHANNELS %d\n", *(int*)arg); 
 		return 0;
 	}
 	case SOUND_PCM_READ_BITS:
 	{
 		*(int *)arg = snd_pcm_format_width(oss_format_to_alsa(dsp->format));
+		debug("SOUND_PCM_READ_BITS %d\n", *(int*)arg); 
 		return 0;
 	}
 	case SNDCTL_DSP_MAPINBUF:
@@ -1288,13 +1308,6 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 						w1++;
 					if (e && FD_ISSET(fd1, efds1))
 						e1++;
-#if 1
-				{
-				  size_t delay;
-				  snd_pcm_delay(str->pcm, &delay);
-				  fprintf(stderr, "%d %d %d\n", delay, str->buffer_size, str->fragment_size);
-				}
-#endif
 				}
 			}
 			break;
