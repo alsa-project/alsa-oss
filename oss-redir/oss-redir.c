@@ -171,8 +171,10 @@ int oss_pcm_close(int fd)
 	if (native_oss)
 		return close(fd);
 	result = x_oss_pcm_close(fd);
-	if (--open_count)
+	if (--open_count) {
 		dlclose(dl_handle);
+		dl_handle = NULL;
+	}
 	return result;
 }
 
