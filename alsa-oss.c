@@ -209,8 +209,10 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 		err = snd_pcm_hw_params_info(pcm, &hw, &info);
 		if (err < 0)
 			return err;
+#if 0
 		if (debug)
 			snd_pcm_dump_setup(pcm, stderr);
+#endif
 		dsp->rate = hw.rate;
 		dsp->format = alsa_format_to_oss(hw.format);
 		str->frame_bytes = snd_pcm_format_physical_width(hw.format) * hw.channels / 8;
@@ -377,7 +379,8 @@ static ssize_t oss_dsp_write(int fd, const void *buf, size_t n)
 	size_t frames;
 	if (!pcm) {
 		errno = EBADFD;
-		return -1;
+		result = -1;
+		goto _end;
 	}
 	frames = n / str->frame_bytes;
  _again:
@@ -388,11 +391,17 @@ static ssize_t oss_dsp_write(int fd, const void *buf, size_t n)
 		goto _again;
 	if (result < 0) {
 		errno = -result;
-		return -1;
+		result = -1;
+		goto _end;
 	}
 	result *= str->frame_bytes;
 	str->bytes += result;
-	DEBUG("write(%d, %p, %ld) -> %ld\n", fd, buf, (long)n, (long)result);
+ _end:
+	DEBUG("write(%d, %p, %ld) -> %ld", fd, buf, (long)n, (long)result);
+	if (result < 0)
+		DEBUG("(errno=%d)\n", errno);
+	else
+		DEBUG("\n");
 	return result;
 }
 
@@ -405,7 +414,8 @@ static ssize_t oss_dsp_read(int fd, void *buf, size_t n)
 	size_t frames;
 	if (!pcm) {
 		errno = EBADFD;
-		return -1;
+		result = -1;
+		goto _end;
 	}
 	frames = n / str->frame_bytes;
  _again:
@@ -416,11 +426,17 @@ static ssize_t oss_dsp_read(int fd, void *buf, size_t n)
 		goto _again;
 	if (result < 0) {
 		errno = -result;
-		return -1;
+		result = -1;
+		goto _end;
 	}
 	result *= str->frame_bytes;
 	str->bytes += result;
-	DEBUG("read(%d, %p, %ld) -> %ld\n", fd, buf, (long)n, (long)result);
+ _end:
+	DEBUG("read(%d, %p, %ld) -> %ld", fd, buf, (long)n, (long)result);
+	if (result < 0)
+		DEBUG("(errno=%d)\n", errno);
+	else
+		DEBUG("\n");
 	return result;
 }
 
@@ -918,10 +934,9 @@ static int oss_dsp_fcntl(int fd, int cmd, ...)
 static void *oss_dsp_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUSED, int prot ATTRIBUTE_UNUSED, int flags ATTRIBUTE_UNUSED, int fd, off_t offset ATTRIBUTE_UNUSED)
 {
 	int err;
-	const snd_pcm_channel_area_t *areas;
+	void *result;
 	oss_dsp_t *dsp = fds[fd].private;
 	oss_dsp_stream_t *str;
-	DEBUG("mmap(%p, %lu, %d, %d, %d, %ld)\n", addr, (unsigned long)len, prot, flags, fd, offset);
 	str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 	if (!str->pcm)
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
@@ -929,10 +944,13 @@ static void *oss_dsp_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUS
 	err = oss_dsp_params(dsp);
 	if (err < 0) {
 		errno = -err;
-		return MAP_FAILED;
+		result = MAP_FAILED;
+		goto _end;
 	}
-	areas = snd_pcm_mmap_areas(str->pcm);
-	return areas->addr;
+	result = snd_pcm_mmap_areas(str->pcm)->addr;
+ _end:
+	DEBUG("mmap(%p, %lu, %d, %d, %d, %ld) -> %p\n", addr, (unsigned long)len, prot, flags, fd, offset, result);
+	return result;
 }
 
 static int oss_dsp_munmap(int fd, void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUSED)
@@ -1068,6 +1086,11 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
 int munmap(void *addr, size_t len)
 {
 	int fd;
+#if 0
+	/* Tricky here: matches snd_pcm_munmap */
+	if (errno == 12345)
+		return _munmap(addr, len);
+#endif
 	for (fd = 0; fd < open_max; ++fd) {
 		if (fds[fd].mmap_area == addr)
 			break;
