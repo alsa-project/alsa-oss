@@ -71,7 +71,6 @@ typedef enum {
 static ops_t ops[FD_CLASSES];
 
 typedef struct {
-	int count;
 	fd_class_t class;
 	void *mmap_area;
 } fd_t;
@@ -205,7 +204,15 @@ int open(const char *file, int oflag, ...)
 		}
 	} else if (!strncmp(file, "/dev/mixer", 10)) {
 		fd = lib_oss_mixer_open(file, oflag);
-		fds[fd]->class = FD_OSS_MIXER;
+		if (fd >= 0) {
+			fds[fd] = calloc(sizeof(fd_t), 1);
+			if (fds[fd] == NULL) {
+				ops[FD_OSS_MIXER].close(fd);
+				errno = ENOMEM;
+				return -1;
+			}
+			fds[fd]->class = FD_OSS_MIXER;
+		}
 	} else {
 		fd = _open(file, oflag, mode);
 		if (fd >= 0)

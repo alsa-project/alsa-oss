@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# A simple script to facilitate the use of the OSS compatibility library.
+# Usage:
+#	testaoss <command> <command options and arguments>
+
+prefix=@top_srcdir@
+ALSA_OSS_WRAPPER=1 LD_PRELOAD=${prefix}/alsa/.libs/libaoss.so $*

@@ -43,7 +43,7 @@ main()
 	fd_set writeset;
 
 	close(0);
-	if ((fd=open("/dev/dsp", O_RDWR, 0))==-1)
+	if ((fd=oss_pcm_open("/dev/dsp", O_RDWR, 0))==-1)
 	{
 		perror("/dev/dsp");
 		exit(-1);
@@ -53,7 +53,7 @@ main()
  */
 
 	tmp = 48000;
-	ioctl(fd, SNDCTL_DSP_SPEED, &tmp);
+	oss_pcm_ioctl(fd, SNDCTL_DSP_SPEED, &tmp);
 	printf("Speed set to %d\n", tmp);
 
 /*
@@ -69,7 +69,7 @@ main()
   }
   else perror("smpl");
 
-	if (ioctl(fd, SNDCTL_DSP_GETCAPS, &caps)==-1)
+	if (oss_pcm_ioctl(fd, SNDCTL_DSP_GETCAPS, &caps)==-1)
 	{
 		perror("/dev/dsp");
 		fprintf(stderr, "Sorry but your sound driver is too old\n");
@@ -83,7 +83,7 @@ main()
  * The application should also check for DSP_CAP_MMAP bit but this
  * version of driver doesn't have it yet.
  */
-/*	ioctl(fd, SNDCTL_DSP_SETSYNCRO, 0); */
+/*	oss_pcm_ioctl(fd, SNDCTL_DSP_SETSYNCRO, 0); */
 
 /*
  * You need version 3.5-beta7 or later of the sound driver before next
@@ -104,14 +104,14 @@ main()
  * select call returns.
  */
 
-	ioctl(fd, SNDCTL_DSP_SETFRAGMENT, &frag);
+	oss_pcm_ioctl(fd, SNDCTL_DSP_SETFRAGMENT, &frag);
 
 /*
  * Compute total size of the buffer. It's important to use this value
  * in mmap() call.
  */
 
-	if (ioctl(fd, SNDCTL_DSP_GETOSPACE, &info)==-1)
+	if (oss_pcm_ioctl(fd, SNDCTL_DSP_GETOSPACE, &info)==-1)
 	{
 		perror("GETOSPACE");
 		exit(-1);
@@ -172,7 +172,7 @@ main()
  */
 
 	tmp = 0;
-	ioctl(fd, SNDCTL_DSP_SETTRIGGER, &tmp);
+	oss_pcm_ioctl(fd, SNDCTL_DSP_SETTRIGGER, &tmp);
 	printf("Trigger set to %08x\n", tmp);
 
 /*
@@ -180,7 +180,7 @@ main()
  */
 
 	tmp = PCM_ENABLE_OUTPUT;
-	ioctl(fd, SNDCTL_DSP_SETTRIGGER, &tmp);
+	oss_pcm_ioctl(fd, SNDCTL_DSP_SETTRIGGER, &tmp);
 	printf("Trigger set to %08x\n", tmp);
 
 /*
@@ -220,7 +220,7 @@ main()
  * the beginning of total buffer area).
  */
 
-		if (ioctl(fd, SNDCTL_DSP_GETOPTR, &count)==-1)
+		if (oss_pcm_ioctl(fd, SNDCTL_DSP_GETOPTR, &count)==-1)
 		{
 			perror("GETOPTR");
 			exit(-1);
@@ -286,7 +286,7 @@ main()
 
 	printf( ">>>> open (2)\n" ); fflush( stdout );
 
-	if ((fd=open("/dev/dsp", O_RDWR, 0))==-1)
+	if ((fd=oss_pcm_open("/dev/dsp", O_RDWR, 0))==-1)
 	{
 		perror("/dev/dsp");
 		exit(-1);

@@ -44,6 +44,7 @@ static void initialize(void);
 
 static int (*x_oss_pcm_open)(const char *pathname, int flags);
 static int (*x_oss_pcm_close)(int fd);
+int (*oss_pcm_nonblock)(int fd, int nonblock);
 ssize_t (*oss_pcm_read)(int fd, void *buf, size_t count);
 ssize_t (*oss_pcm_write)(int fd, const void *buf, size_t count);
 void * (*oss_pcm_mmap)(void *start, size_t length, int prot, int flags, int fd, off_t offset);

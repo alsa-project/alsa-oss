@@ -4,7 +4,7 @@ else
 ALSA_DIR =
 endif
 
-SUBDIRS = $(ALSA_DIR) oss-redir
+SUBDIRS = $(ALSA_DIR) oss-redir test
 
 dist-hook:
 	echo $(VERSION) >> version

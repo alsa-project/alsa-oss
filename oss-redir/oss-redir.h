@@ -29,6 +29,10 @@ struct pollfd;
 #define OSS_WAIT_EVENT_WRITE	(1<<1)
 #define OSS_WAIT_EVENT_ERROR	(1<<2)
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 extern int oss_pcm_open(const char *pathname, int flags, ...);
 extern int oss_pcm_close(int fd);
 extern int (*oss_pcm_nonblock)(int fd, int nonblock);
@@ -47,5 +51,8 @@ extern int oss_mixer_open(const char *pathname, int flags, ...);
 extern int oss_mixer_close(int fd);
 extern int (*oss_mixer_ioctl)(int fd, unsigned long int request, ...);
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __OSS_REDIR_H */
