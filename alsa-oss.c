@@ -182,55 +182,68 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 		snd_pcm_t *pcm = str->pcm;
 		snd_pcm_hw_params_t hw;
 		snd_pcm_sw_params_t sw;
-		snd_pcm_hw_info_t info;
-		snd_pcm_strategy_t *strategy;
 		int format;
 		int frag_length;
 		int err;
 		if (!pcm)
 			continue;
-		snd_pcm_hw_info_any(&info);
+		snd_pcm_hw_params_any(pcm, &hw);
 		if (str->mmap)
-			info.access_mask = SND_PCM_ACCBIT_MMAP_INTERLEAVED;
+			err = snd_pcm_hw_params_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_MMAP_INTERLEAVED);
 		else
-			info.access_mask = SND_PCM_ACCBIT_RW_INTERLEAVED;
+			err = snd_pcm_hw_params_set(pcm, &hw, SND_PCM_HW_PARAM_ACCESS, SND_PCM_ACCESS_RW_INTERLEAVED);
+		if (err < 0)
+			return err;
 		format = oss_format_to_alsa(dsp->format);
-		info.format_mask = 1 << format;
-		info.channels_min = info.channels_max = dsp->channels;
 
-		if (dsp->maxfrags > 0)
-			info.fragments_max = dsp->maxfrags;
+		err = snd_pcm_hw_params_set(pcm, &hw, SND_PCM_HW_PARAM_FORMAT,
+					    format);
+		if (err < 0)
+			return err;
+		err = snd_pcm_hw_params_set(pcm, &hw, SND_PCM_HW_PARAM_CHANNELS,
+					    dsp->channels);
+		if (err < 0)
+			return err;
+
+		err = snd_pcm_hw_params_min(pcm, &hw, SND_PCM_HW_PARAM_FRAGMENTS,
+					    2);
+		if (err < 0)
+			return err;
+		if (dsp->maxfrags > 0) {
+			err = snd_pcm_hw_params_max(pcm, &hw, SND_PCM_HW_PARAM_FRAGMENTS,
+						    dsp->maxfrags);
+			if (err < 0)
+				return err;
+		}
 		if (dsp->fragshift > 0) {
 			frag_length = 1 << dsp->fragshift;
 			frag_length /= snd_pcm_format_physical_width(format) / 8;
 			frag_length = (u_int64_t) frag_length * 1000000 / dsp->rate;
 		} else
 			frag_length = 250000;
-		err = snd_pcm_strategy_simple(&strategy, 1000000, 2000000);
-		assert(err >= 0);
-		err = snd_pcm_strategy_simple_near(strategy, 0, SND_PCM_HW_INFO_RATE,
-						   dsp->rate, 1);
-		assert(err >= 0);
-		err = snd_pcm_strategy_simple_near(strategy, 1, SND_PCM_HW_INFO_FRAGMENT_LENGTH,
-						   frag_length, 1);
-		assert(err >= 0);
-		err = snd_pcm_hw_info_strategy(pcm, &info, strategy);
-		snd_pcm_strategy_free(strategy);
+		err = snd_pcm_hw_params_near(pcm, &hw, SND_PCM_HW_PARAM_RATE,
+					     dsp->rate);
 		if (err < 0)
 			return err;
-		err = snd_pcm_hw_params_info(pcm, &hw, &info);
+		err = snd_pcm_hw_params_near(pcm, &hw, SND_PCM_HW_PARAM_FRAGMENT_LENGTH,
+					     frag_length);
+		if (err < 0)
+			return err;
+		if (err < 0)
+			return err;
+		err = snd_pcm_hw_params(pcm, &hw);
 		if (err < 0)
 			return err;
 #if 0
 		if (debug)
 			snd_pcm_dump_setup(pcm, stderr);
 #endif
-		dsp->rate = hw.rate;
-		dsp->format = alsa_format_to_oss(hw.format);
-		str->frame_bytes = snd_pcm_format_physical_width(hw.format) * hw.channels / 8;
-		str->fragment_size = hw.fragment_size;
-		str->fragments = hw.fragments;
-		str->buffer_size = hw.fragments * hw.fragment_size;
+		dsp->rate = snd_pcm_hw_params_value(&hw, SND_PCM_HW_PARAM_RATE);
+		dsp->format = alsa_format_to_oss(format);
+		str->frame_bytes = snd_pcm_format_physical_width(format) * dsp->channels;
+		str->fragment_size = snd_pcm_hw_params_value(&hw, SND_PCM_HW_PARAM_FRAGMENT_SIZE);
+		str->fragments = snd_pcm_hw_params_value(&hw, SND_PCM_HW_PARAM_FRAGMENTS);
+		str->buffer_size = str->fragments * str->fragment_size;
 		if (str->disabled)
 			sw.start_mode = SND_PCM_START_EXPLICIT;
 		else
@@ -240,7 +253,7 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 		else
 			sw.xrun_mode = SND_PCM_XRUN_FRAGMENT;
 		sw.ready_mode = SND_PCM_READY_FRAGMENT;
-		sw.avail_min = hw.fragment_size;
+		sw.avail_min = str->fragment_size;
 		sw.xfer_min = 1;
 		sw.xfer_align = 1;
 		sw.time = 0;
