@@ -262,15 +262,15 @@ static int oss_dsp_sw_params(oss_dsp_t *dsp)
 		snd_pcm_sw_params_current(pcm, &sw);
 		snd_pcm_sw_param_set(pcm, &sw,
 				     SND_PCM_SW_PARAM_XFER_ALIGN, 1);
-		if (str->disabled)
-			snd_pcm_sw_param_set(pcm, &sw, 
-					     SND_PCM_SW_PARAM_START_MODE, 
-					     SND_PCM_START_EXPLICIT);
+		snd_pcm_sw_param_set(pcm, &sw, 
+				     SND_PCM_SW_PARAM_START_MODE, 
+				     str->disabled ? SND_PCM_START_EXPLICIT :
+				     SND_PCM_START_DATA);
 #if 1
-		if (str->mmap)
-			snd_pcm_sw_param_set(pcm, &sw,
-					     SND_PCM_SW_PARAM_XRUN_MODE, 
-					     SND_PCM_XRUN_NONE);
+		snd_pcm_sw_param_set(pcm, &sw,
+				     SND_PCM_SW_PARAM_XRUN_MODE, 
+				     str->mmap ? SND_PCM_XRUN_NONE :
+				     SND_PCM_XRUN_STOP);
 #else
 		snd_pcm_sw_param_set(pcm, &sw,
 				     SND_PCM_SW_PARAM_XRUN_MODE, 
@@ -508,7 +508,7 @@ static ssize_t oss_dsp_read(int fd, void *buf, size_t n)
 
 static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 {
-	int result, err;
+	int result, err = 0;
 	va_list args;
 	void *arg;
 	oss_dsp_t *dsp = fds[fd]->private;
@@ -523,7 +523,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	case OSS_GETVERSION:
 		*(int*)arg = SOUND_VERSION;
 		DEBUG("OSS_GETVERSION, %p) -> [%d]\n", arg, *(int*)arg);
-		return 0;
+		break;
 	case SNDCTL_DSP_RESET:
 	{
 		int k;
@@ -541,11 +541,8 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 				result = err;
 			str->bytes = 0;
 		}
-		if (result < 0) {
-			errno = -result;
-			return -1;
-		}
-		return 0;
+		err = result;
+		break;
 	}
 	case SNDCTL_DSP_SYNC:
 	{
@@ -564,57 +561,42 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 				result = err;
 			
 		}
-		if (result < 0) {
-			errno = -result;
-			return -1;
-		}
-		return 0;
+		err = result;
+		break;
 	}
 	case SNDCTL_DSP_SPEED:
 		dsp->rate = *(int *)arg;
 		err = oss_dsp_params(dsp);
-		if (err < 0) {
-			errno = -err;
-			return -1;
-		}
 		DEBUG("SNDCTL_DSP_SPEED, %p[%d]) -> [%d]\n", arg, *(int *)arg, dsp->rate);
 		*(int *)arg = dsp->rate;
-		return 0;
+		break;
 	case SNDCTL_DSP_STEREO:
 		if (*(int *)arg)
 			dsp->channels = 2;
 		else
 			dsp->channels = 1;
 		err = oss_dsp_params(dsp);
-		if (err < 0) {
-			errno = -err;
-			return -1;
-		}
 		DEBUG("SNDCTL_DSP_STEREO, %p[%d]) -> [%d]\n", arg, *(int *)arg, dsp->channels - 1);
 		*(int *)arg = dsp->channels - 1;
-		return 0;
+		break;
 	case SNDCTL_DSP_CHANNELS:
 		dsp->channels = (*(int *)arg);
 		err = oss_dsp_params(dsp);
-		if (err < 0) {
-			errno = -err;
-			return -1;
-		}
+		if (err < 0)
+			break;
 		DEBUG("SNDCTL_DSP_CHANNELS, %p[%d]) -> [%d]\n", arg, *(int *)arg, dsp->channels);
 		*(int *)arg = dsp->channels;
-		return 0;
+		break;
 	case SNDCTL_DSP_SETFMT:
 		if (*(int *)arg != AFMT_QUERY) {
 			dsp->format = *(int *)arg;
 			err = oss_dsp_params(dsp);
-			if (err < 0) {
-				errno = -err;
-				return -1;
-			}
+			if (err < 0)
+				break;
 		}
 		DEBUG("SNDCTL_DSP_SETFMT, %p[%d]) -> [%d]\n", arg, *(int *)arg, dsp->format);
 		*(int *) arg = dsp->format;
-		return 0;
+		break;
 	case SNDCTL_DSP_GETBLKSIZE:
 		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 		if (!str->pcm)
@@ -622,21 +604,17 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		pcm = str->pcm;
 		*(int *) arg = str->period_size * str->frame_bytes;
 		DEBUG("SNDCTL_DSP_GETBLKSIZE, %p) -> [%d]\n", arg, *(int *)arg);
-		return 0;
+		break;
 	case SNDCTL_DSP_POST:
 		DEBUG("SNDCTL_DSP_POST)\n");
-		return 0;
+		break;
 	case SNDCTL_DSP_SUBDIVIDE:
 		DEBUG("SNDCTL_DSP_SUBDIVIDE, %p[%d])\n", arg, *(int *)arg);
 		dsp->subdivision = *(int *)arg;
 		if (dsp->subdivision < 1)
 			dsp->subdivision = 1;
 		err = oss_dsp_params(dsp);
-		if (err < 0) {
-			errno = -err;
-			return -1;
-		}
-		return 0;
+		break;
 	case SNDCTL_DSP_SETFRAGMENT:
 	{
 		DEBUG("SNDCTL_DSP_SETFRAGMENT, %p[%x])\n", arg, *(int *)arg);
@@ -647,11 +625,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		if (dsp->maxfrags < 2)
 			dsp->maxfrags = 2;
 		err = oss_dsp_params(dsp);
-		if (err < 0) {
-			errno = -err;
-			return -1;
-		}
-		return 0;
+		break;
 	}
 	case SNDCTL_DSP_GETFMTS:
 	{
@@ -659,7 +633,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 			       AFMT_U8 | AFMT_S16_LE | AFMT_S16_BE | 
 			       AFMT_S8 | AFMT_U16_LE | AFMT_U16_BE);
 		DEBUG("SNDCTL_DSP_GETFMTS, %p) -> [%d]\n", arg, *(int *)arg);
-		return 0;
+		break;
 	}
 	case SNDCTL_DSP_NONBLOCK:
 	{
@@ -674,11 +648,8 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 			if (err < 0)
 				result = err;
 		}
-		if (result < 0) {
-			errno = -result;
-			return -1;
-		}
-		return 0;
+		result = err;
+		break;
 	}
 	case SNDCTL_DSP_GETCAPS:
 	{
@@ -688,7 +659,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 			result |= DSP_CAP_DUPLEX;
 		*(int*)arg = result;
 		DEBUG("SNDCTL_DSP_GETCAPS, %p) -> [%d]\n", arg, *(int*)arg);
-		return 0;
+		break;
 	}
 	case SNDCTL_DSP_GETTRIGGER:
 	{
@@ -707,7 +678,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		}
 		*(int*)arg = s;
 		DEBUG("SNDCTL_DSP_GETTRIGGER, %p) -> [%d]\n", arg, *(int*)arg);
-		return 0;
+		break;
 	}		
 	case SNDCTL_DSP_SETTRIGGER:
 	{
@@ -717,29 +688,59 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		pcm = str->pcm;
 		if (pcm) {
 			if (result & PCM_ENABLE_INPUT) {
-				str->disabled = 0;
-				if (oss_dsp_sw_params(dsp) >= 0)
-					snd_pcm_start(pcm);
+				if (str->disabled) {
+					str->disabled = 0;
+					err = oss_dsp_sw_params(dsp);
+					if (err < 0)
+						break;
+					err = snd_pcm_start(pcm);
+					if (err < 0)
+						break;
+				}
 			} else {
-				str->disabled = 1;
-				if (snd_pcm_drop(pcm) >= 0)
-					oss_dsp_sw_params(dsp);				
+				if (!str->disabled) {
+					str->disabled = 1;
+					err = snd_pcm_drop(pcm);
+					if (err < 0)
+						break;
+					err = oss_dsp_sw_params(dsp);
+					if (err < 0)
+						break;
+					err = snd_pcm_prepare(pcm);
+					if (err < 0)
+						break;
+				}
 			}
 		}
 		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 		pcm = str->pcm;
 		if (pcm) {
 			if (result & PCM_ENABLE_OUTPUT) {
-				str->disabled = 0;
-				if (oss_dsp_sw_params(dsp) >= 0)
-					snd_pcm_start(pcm);
+				if (str->disabled) {
+					str->disabled = 0;
+					err = oss_dsp_sw_params(dsp);
+					if (err < 0)
+						break;
+					err = snd_pcm_start(pcm);
+					if (err < 0)
+						break;
+				}
 			} else {
-				str->disabled = 1;
-				if (snd_pcm_drop(pcm) >= 0)
-					oss_dsp_sw_params(dsp);				
+				if (!str->disabled) {
+					str->disabled = 1;
+					err = snd_pcm_drop(pcm);
+					if (err < 0)
+						break;
+					err = oss_dsp_sw_params(dsp);
+					if (err < 0)
+						break;
+					err = snd_pcm_prepare(pcm);
+					if (err < 0)
+						break;
+				}
 			}
 		}
-		return 0;
+		break;
 	}
 	case SNDCTL_DSP_GETISPACE:
 	{
@@ -748,11 +749,11 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 		pcm = str->pcm;
 		if (!pcm) {
-			errno = EINVAL;
-			return -1;
+			err = -EINVAL;
+			break;
 		}
 		if (snd_pcm_state(pcm) == SND_PCM_STATE_RUNNING) {
-			err = snd_pcm_delay(pcm, &delay);
+			snd_pcm_delay(pcm, &delay);
 		}
 		avail = snd_pcm_avail_update(pcm);
 		if (avail < 0)
@@ -766,7 +767,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		      info->fragstotal,
 		      info->fragsize,
 		      info->bytes);
-		return 0;
+		break;
 	}
 	case SNDCTL_DSP_GETOSPACE:
 	{
@@ -775,11 +776,11 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 		pcm = str->pcm;
 		if (!pcm) {
-			errno = EINVAL;
-			return -1;
+			err = -EINVAL;
+			break;
 		}
 		if (snd_pcm_state(pcm) == SND_PCM_STATE_RUNNING) {
-			err = snd_pcm_delay(pcm, &delay);
+			snd_pcm_delay(pcm, &delay);
 		}
 		avail = snd_pcm_avail_update(pcm);
 		if (avail < 0)
@@ -793,34 +794,27 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		      info->fragstotal,
 		      info->fragsize,
 		      info->bytes);
-		return 0;
+		break;
 	}
 	case SNDCTL_DSP_GETIPTR:
 	{
-		snd_pcm_sframes_t avail, delay;
+		snd_pcm_sframes_t delay;
 		snd_pcm_uframes_t hw_ptr;
 		count_info *info = arg;
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 		pcm = str->pcm;
 		if (!pcm) {
-			errno = EINVAL;
-			return -1;
+			err = -EINVAL;
+			break;
 		}
 		if (snd_pcm_state(pcm) == SND_PCM_STATE_RUNNING) {
 			err = snd_pcm_delay(pcm, &delay);
-			if (err < 0) {
-				errno = -err;
-				return -1;
-			}
+			if (err < 0)
+				break;
 		} else
 			delay = 0;
-		avail = snd_pcm_avail_update(pcm);
-		if (avail < 0) {
-			errno = -avail;
-			return -1;
-		}
-		hw_ptr = _snd_pcm_mmap_hw_ptr(pcm);
 		/* FIXME */
+		hw_ptr = _snd_pcm_mmap_hw_ptr(pcm);
 		info->bytes = hw_ptr;
 		info->bytes *= str->frame_bytes;
 		info->ptr = hw_ptr % str->buffer_size;
@@ -837,32 +831,25 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		      info->bytes,
 		      info->blocks,
 		      info->ptr);
-		return 0;
+		break;
 	}
 	case SNDCTL_DSP_GETOPTR:
 	{
-		snd_pcm_sframes_t avail, delay;
+		snd_pcm_sframes_t delay;
 		snd_pcm_uframes_t hw_ptr;
 		count_info *info = arg;
 		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 		pcm = str->pcm;
 		if (!pcm) {
-			errno = EINVAL;
-			return -1;
+			err = -EINVAL;
+			break;
 		}
 		err = snd_pcm_delay(pcm, &delay);
 		if (snd_pcm_state(pcm) == SND_PCM_STATE_RUNNING) {
-			if (err < 0) {
-				errno = -err;
-				return -1;
-			}
+			if (err < 0)
+				break;
 		} else
 			delay = 0;
-		avail = snd_pcm_avail_update(pcm);
-		if (avail < 0) {
-			errno = -avail;
-			return -1;
-		}
 		/* FIXME */
 		hw_ptr = _snd_pcm_mmap_hw_ptr(pcm);
 		info->bytes = hw_ptr;
@@ -881,7 +868,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		      info->bytes,
 		      info->blocks,
 		      info->ptr);
-		return 0;
+		break;
 	}
 	case SNDCTL_DSP_GETODELAY:
 	{
@@ -889,63 +876,67 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 		pcm = str->pcm;
 		if (!pcm) {
-			errno = EINVAL;
-			return -1;
+			err = -EINVAL;
+			break;
 		}
 		if (snd_pcm_state(pcm) != SND_PCM_STATE_RUNNING ||
 		    snd_pcm_delay(pcm, &delay) < 0)
 			delay = 0;
 		*(int *)arg = delay * str->frame_bytes;
 		DEBUG("SNDCTL_DSP_GETODELAY, %p) -> [%d]\n", arg, *(int*)arg); 
-		return 0;
+		break;
 	}
 	case SNDCTL_DSP_SETDUPLEX:
 		DEBUG("SNDCTL_DSP_SETDUPLEX)\n"); 
-		return 0;
+		break;
 	case SOUND_PCM_READ_RATE:
 	{
 		*(int *)arg = dsp->rate;
 		DEBUG("SOUND_PCM_READ_RATE, %p) -> [%d]\n", arg, *(int*)arg); 
-		return 0;
+		break;
 	}
 	case SOUND_PCM_READ_CHANNELS:
 	{
 		*(int *)arg = dsp->channels;
 		DEBUG("SOUND_PCM_READ_CHANNELS, %p) -> [%d]\n", arg, *(int*)arg); 
-		return 0;
+		break;
 	}
 	case SOUND_PCM_READ_BITS:
 	{
 		*(int *)arg = snd_pcm_format_width(oss_format_to_alsa(dsp->format));
 		DEBUG("SOUND_PCM_READ_BITS, %p) -> [%d]\n", arg, *(int*)arg); 
-		return 0;
+		break;
 	}
 	case SNDCTL_DSP_MAPINBUF:
 		DEBUG("SNDCTL_DSP_MAPINBUF)\n");
-		errno = EINVAL;
-		return -1;
+		err = -EINVAL;
+		break;
 	case SNDCTL_DSP_MAPOUTBUF:
 		DEBUG("SNDCTL_DSP_MAPOUTBUF)\n");
-		errno = EINVAL;
-		return -1;
+		err = -EINVAL;
+		break;
 	case SNDCTL_DSP_SETSYNCRO:
 		DEBUG("SNDCTL_DSP_SETSYNCRO)\n");
-		errno = EINVAL;
-		return -1;
+		err = -EINVAL;
+		break;
 	case SOUND_PCM_READ_FILTER:
 		DEBUG("SOUND_PCM_READ_FILTER)\n");
-		errno = EINVAL;
-		return -1;
+		err = -EINVAL;
+		break;
 	case SOUND_PCM_WRITE_FILTER:
 		DEBUG("SOUND_PCM_WRITE_FILTER)\n");
-		errno = EINVAL;
-		return -1;
+		err = -EINVAL;
+		break;
 	default:
 		DEBUG("%lx, %p)\n", cmd, arg);
 		// return oss_mixer_ioctl(...);
-		errno = ENXIO;
-		return -1;
+		err = -ENXIO;
+		break;
 	}
+	if (err >= 0)
+		return 0;
+	errno = -err;
+	return -1;
 }
 
 static int oss_dsp_fcntl(int fd, int cmd, ...)
@@ -995,15 +986,34 @@ static int oss_dsp_fcntl(int fd, int cmd, ...)
 	return -1;
 }
 
-static void *oss_dsp_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUSED, int prot ATTRIBUTE_UNUSED, int flags ATTRIBUTE_UNUSED, int fd, off_t offset ATTRIBUTE_UNUSED)
+static void *oss_dsp_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUSED, int prot, int flags ATTRIBUTE_UNUSED, int fd, off_t offset ATTRIBUTE_UNUSED)
 {
 	int err;
 	void *result;
 	oss_dsp_t *dsp = fds[fd]->private;
 	oss_dsp_stream_t *str;
-	str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
-	if (!str->pcm)
+	switch (prot & (PROT_READ | PROT_WRITE)) {
+	case PROT_READ:
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
+		break;
+	case PROT_WRITE:
+		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
+		break;
+	case PROT_READ | PROT_WRITE:
+		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
+		if (!str->pcm)
+			str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
+		break;
+	default:
+		errno = EINVAL;
+		result = MAP_FAILED;
+		goto _end;
+	}
+	if (!str->pcm) {
+		errno = EBADFD;
+		result = MAP_FAILED;
+		goto _end;
+	}
 	str->mmap = 1;
 	str->mmap_bytes = len;
 	err = oss_dsp_params(dsp);
