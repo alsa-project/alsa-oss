@@ -1,6 +1,6 @@
 AC_PREREQ(2.53)
 AC_INIT(alsa/alsa-oss.c)
-AM_INIT_AUTOMAKE(alsa-oss, 1.0.5)
+AM_INIT_AUTOMAKE(alsa-oss, 1.0.6rc1)
 
 AC_PREFIX_DEFAULT(/usr)
 
