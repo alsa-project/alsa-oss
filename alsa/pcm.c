@@ -40,9 +40,6 @@
 
 #include "alsa-oss-emul.h"
 
-snd_pcm_uframes_t _snd_pcm_boundary(snd_pcm_t *pcm);
-snd_pcm_uframes_t _snd_pcm_mmap_hw_ptr(snd_pcm_t *pcm);
-
 int alsa_oss_debug = 0;
 snd_output_t *alsa_oss_debug_out = NULL;
 
@@ -53,6 +50,7 @@ typedef struct {
 		snd_pcm_uframes_t period_size;
 		snd_pcm_uframes_t buffer_size;
 		snd_pcm_uframes_t boundary;
+		snd_pcm_uframes_t appl_ptr;
 		snd_pcm_uframes_t old_hw_ptr;
 		size_t mmap_buffer_bytes;
 		size_t mmap_period_bytes;
@@ -62,6 +60,8 @@ typedef struct {
 		unsigned int periods;
 		snd_pcm_uframes_t buffer_size;
 		size_t bytes;
+		size_t hw_bytes;
+		size_t boundary;
 	} oss;
 	unsigned int stopped:1;
 	void *mmap_buffer;
@@ -339,6 +339,10 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 				a->step = bits_per_frame;
 			}
 		}
+		str->oss.hw_bytes = 0;
+		str->oss.boundary = (0x3fffffff / str->oss.buffer_size) * str->oss.buffer_size;
+		str->alsa.appl_ptr = 0;
+		str->alsa.old_hw_ptr = 0;
 	}
 	return 0;
 }
@@ -374,7 +378,12 @@ static int oss_dsp_sw_params(oss_dsp_t *dsp)
 		err = snd_pcm_sw_params(pcm, sw);
 		if (err < 0)
 			return err;
-		str->alsa.boundary = _snd_pcm_boundary(pcm);
+		err = snd_pcm_sw_params_current(pcm, sw);
+		if (err < 0)
+			return err;
+		err = snd_pcm_sw_params_get_boundary(sw, &str->alsa.boundary);
+		if (err < 0)
+			return err;
 	}
 	return 0;
 }
@@ -603,6 +612,9 @@ ssize_t lib_oss_pcm_write(int fd, const void *buf, size_t n)
 		errno = -result;
 		result = -1;
 		goto _end;
+	} else {
+		str->alsa.appl_ptr += result;
+		str->alsa.appl_ptr %= str->alsa.boundary;
 	}
 	result *= str->frame_bytes;
 	str->oss.bytes += result;
@@ -653,6 +665,9 @@ ssize_t lib_oss_pcm_read(int fd, void *buf, size_t n)
 		errno = -result;
 		result = -1;
 		goto _end;
+	} else {
+		str->alsa.appl_ptr += result;
+		str->alsa.appl_ptr %= str->alsa.boundary;
 	}
 	result *= str->frame_bytes;
 	str->oss.bytes += result;
@@ -709,7 +724,11 @@ static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
 					   dsp->format);
 			err = snd_pcm_mmap_commit(pcm, ofs, frames);
 			assert(err == (snd_pcm_sframes_t) frames);
+			if (err < 0)
+				break;
 			size -= frames;
+			str->alsa.appl_ptr += frames;
+			str->alsa.appl_ptr %= str->alsa.boundary;
 		}
 		break;
 	case SND_PCM_STREAM_CAPTURE:
@@ -755,6 +774,9 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 			if (err < 0)
 				result = err;
 			str->oss.bytes = 0;
+			str->oss.hw_bytes = 0;
+			str->alsa.appl_ptr = 0;
+			str->alsa.old_hw_ptr = 0;
 		}
 		err = result;
 		break;
@@ -774,7 +796,9 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 				err = snd_pcm_prepare(pcm);
 			if (err < 0)
 				result = err;
-			
+			str->oss.hw_bytes = 0;
+			str->alsa.appl_ptr = 0;
+			str->alsa.old_hw_ptr = 0;
 		}
 		err = result;
 		break;
@@ -927,11 +951,16 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 						const snd_pcm_channel_area_t *areas;
 						snd_pcm_uframes_t offset;
 						snd_pcm_uframes_t size = str->alsa.buffer_size;
+						ssize_t cres;
 						snd_pcm_mmap_begin(pcm, &areas, &offset, &size);
 						snd_pcm_areas_copy(areas, 0, str->mmap_areas, 0,
 								   dsp->channels, size,
 								   dsp->format);
-						snd_pcm_mmap_commit(pcm, offset, size);
+						cres = snd_pcm_mmap_commit(pcm, offset, size);
+						if (cres > 0) {
+							str->alsa.appl_ptr += cres;
+							str->alsa.appl_ptr %= str->alsa.boundary;
+						}
 					}
 					err = snd_pcm_start(pcm);
 					if (err < 0)
@@ -1021,7 +1050,7 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 	}
 	case SNDCTL_DSP_GETIPTR:
 	{
-		snd_pcm_sframes_t delay = 0;
+		snd_pcm_sframes_t delay = 0, avail, diff;
 		snd_pcm_uframes_t hw_ptr;
 		snd_pcm_state_t state;
 		count_info *info = arg;
@@ -1037,21 +1066,24 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 			if (str->mmap_buffer)
 				oss_dsp_mmap_update(dsp, SND_PCM_STREAM_CAPTURE, delay);
 		}
-		/* FIXME */
-		snd_pcm_avail_update(pcm);
-		hw_ptr = _snd_pcm_mmap_hw_ptr(pcm);
-		info->bytes = hw_ptr;
-		info->bytes *= str->frame_bytes;
-		info->ptr = hw_ptr % str->oss.buffer_size;
-		info->ptr *= str->frame_bytes;
+		avail = snd_pcm_avail_update(pcm);
+		hw_ptr = (str->alsa.appl_ptr + avail) % str->alsa.boundary;
+		diff = hw_ptr - str->alsa.old_hw_ptr;
+		if (diff < 0)
+			diff += str->alsa.boundary;
+		str->oss.hw_bytes += diff;
+		str->oss.hw_bytes %= str->oss.boundary;
+		info->bytes = str->oss.hw_bytes * str->frame_bytes;
+		info->ptr = info->bytes % (str->oss.buffer_size * str->frame_bytes);
 		if (str->mmap_buffer) {
 			ssize_t n = (hw_ptr / str->oss.period_size) - (str->alsa.old_hw_ptr / str->oss.period_size);
 			if (n < 0)
 				n += str->alsa.boundary / str->oss.period_size;
 			info->blocks = n;
-			str->alsa.old_hw_ptr = hw_ptr;
-		} else
+		} else {
 			info->blocks = delay / str->oss.period_size;
+		}
+		str->alsa.old_hw_ptr = hw_ptr;
 		DEBUG("SNDCTL_DSP_GETIPTR, %p) -> {%d %d %d}\n", arg,
 		      info->bytes,
 		      info->blocks,
@@ -1060,7 +1092,7 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 	}
 	case SNDCTL_DSP_GETOPTR:
 	{
-		snd_pcm_sframes_t delay = 0;
+		snd_pcm_sframes_t delay = 0, avail, diff;
 		snd_pcm_uframes_t hw_ptr;
 		snd_pcm_state_t state;
 		count_info *info = arg;
@@ -1077,21 +1109,24 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 			if (str->mmap_buffer)
 				oss_dsp_mmap_update(dsp, SND_PCM_STREAM_PLAYBACK, delay);
 		}
-		/* FIXME */
-		snd_pcm_avail_update(pcm);
-		hw_ptr = _snd_pcm_mmap_hw_ptr(pcm);
-		info->bytes = hw_ptr;
-		info->bytes *= str->frame_bytes;
-		info->ptr = hw_ptr % str->oss.buffer_size;
-		info->ptr *= str->frame_bytes;
+		avail = snd_pcm_avail_update(pcm);
+		hw_ptr = (str->alsa.appl_ptr - (str->alsa.buffer_size - avail)) % str->alsa.boundary;
+		diff = hw_ptr - str->alsa.old_hw_ptr;
+		if (diff < 0)
+			diff += str->alsa.boundary;
+		str->oss.hw_bytes += diff;
+		str->oss.hw_bytes %= str->oss.boundary;
+		info->bytes = str->oss.hw_bytes * str->frame_bytes;
+		info->ptr = info->bytes % (str->oss.buffer_size * str->frame_bytes);
 		if (str->mmap_buffer) {
 			ssize_t n = (hw_ptr / str->oss.period_size) - (str->alsa.old_hw_ptr / str->oss.period_size);
 			if (n < 0)
 				n += str->alsa.boundary / str->oss.period_size;
 			info->blocks = n;
-			str->alsa.old_hw_ptr = hw_ptr;
-		} else
+		} else {
 			info->blocks = delay / str->oss.period_size;
+		}
+		str->alsa.old_hw_ptr = hw_ptr;
 		DEBUG("SNDCTL_DSP_GETOPTR, %p) -> {%d %d %d}\n", arg,
 		      info->bytes,
 		      info->blocks,
