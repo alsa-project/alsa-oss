@@ -471,6 +471,31 @@ int lib_oss_pcm_close(int fd)
 	return 0;
 }
 
+static int open_pcm(oss_dsp_t *dsp, const char *name, unsigned int pcm_mode,
+		    unsigned int streams)
+{
+	int k, result;
+
+	result = -ENODEV;
+	for (k = 0; k < 2; ++k) {
+		if (!(streams & (1 << k)))
+			continue;
+		result = snd_pcm_open(&dsp->streams[k].pcm, name, k, SND_PCM_NONBLOCK);
+		DEBUG("Opened PCM %s for stream %d (result = %d)\n", name, k, result);
+		if (result < 0) {
+			if (k == 1 && dsp->streams[0].pcm != NULL) {
+				dsp->streams[1].pcm = NULL;
+				streams &= ~(1 << SND_PCM_STREAM_CAPTURE);
+				result = 0;
+			}
+			break;
+		} else if (! pcm_mode)
+			/* reset the blocking mode */
+			snd_pcm_nonblock(dsp->streams[k].pcm, 0);
+	}
+	return result;
+}
+
 static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 {
 	oss_dsp_t *dsp;
@@ -552,39 +577,21 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 		if (result < 0)
 			goto _error;
 	}
-	for (k = 0; k < 2; ++k) {
-		if (!(streams & (1 << k)))
-			continue;
-		result = snd_pcm_open(&dsp->streams[k].pcm, name, k, pcm_mode);
-		if (result < 0) {
-			if (k == 1 && dsp->streams[0].pcm != NULL) {
-				dsp->streams[1].pcm = NULL;
-				streams &= ~(1 << SND_PCM_STREAM_CAPTURE);
-				result = 0;
-			}
-			break;
-		}
-	}
+	s = getenv("ALSA_OSS_PCM_DEVICE");
+	result = -ENODEV;
+	if (s && *s)
+		result = open_pcm(dsp, s, pcm_mode, streams);
+	if (result < 0)
+		result = open_pcm(dsp, name, pcm_mode, streams);
 	if (result < 0) {
-		result = 0;
-		for (k = 0; k < 2; ++k) {
-			if (dsp->streams[k].pcm) {
-				snd_pcm_close(dsp->streams[k].pcm);
-				dsp->streams[k].pcm = NULL;
-			}
-		}
 		/* try to open the default pcm as fallback */
 		if (card == 0 && (device == OSS_DEVICE_DSP || device == OSS_DEVICE_AUDIO))
 			strcpy(name, "default");
 		else
 			sprintf(name, "plughw:%d", card);
-		for (k = 0; k < 2; ++k) {
-			if (!(streams & (1 << k)))
-				continue;
-			result = snd_pcm_open(&dsp->streams[k].pcm, name, k, pcm_mode);
-			if (result < 0)
-				goto _error;
-		}
+		result = open_pcm(dsp, name, pcm_mode, streams);
+		if (result < 0)
+			goto _error;
 	}
 	result = oss_dsp_params(dsp);
 	if (result < 0)
