@@ -36,12 +36,14 @@
 #include <linux/soundcard.h>
 #include <sys/asoundlib.h>
 
-#if 0
+static int debug = 0;
+
+#if 1
 #define DEBUG_POLL
 #define DEBUG_SELECT
-#define debug(...) fprintf(stderr, __VA_ARGS__);
+#define DEBUG(...) do { if (debug) fprintf(stderr, __VA_ARGS__); } while (0)
 #else
-#define debug(...)
+#define DEBUG(...)
 #endif
 
 int (*_select)(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
@@ -106,9 +108,10 @@ typedef struct {
 	void *mmap_area;
 } fd_t;
 
-static fd_t fds[OPEN_MAX];
+static int open_max;
+static fd_t *fds;
 
-#define RETRY OPEN_MAX
+#define RETRY open_max
 #define OSS_MAJOR 14
 #define OSS_DEVICE_MIXER 0
 #define OSS_DEVICE_SEQUENCER 1
@@ -206,6 +209,8 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 		err = snd_pcm_hw_params_info(pcm, &hw, &info);
 		if (err < 0)
 			return err;
+		if (debug)
+			snd_pcm_dump_setup(pcm, stderr);
 		dsp->rate = hw.rate;
 		dsp->format = alsa_format_to_oss(hw.format);
 		str->frame_bytes = snd_pcm_format_physical_width(hw.format) * hw.channels / 8;
@@ -387,7 +392,7 @@ static ssize_t oss_dsp_write(int fd, const void *buf, size_t n)
 	}
 	result *= str->frame_bytes;
 	str->bytes += result;
-	debug("WRITE %ld %ld\n", (long)n, (long)result);
+	DEBUG("write(%d, %p, %ld) -> %ld\n", fd, buf, (long)n, (long)result);
 	return result;
 }
 
@@ -415,10 +420,11 @@ static ssize_t oss_dsp_read(int fd, void *buf, size_t n)
 	}
 	result *= str->frame_bytes;
 	str->bytes += result;
+	DEBUG("read(%d, %p, %ld) -> %ld\n", fd, buf, (long)n, (long)result);
 	return result;
 }
 
-static int oss_dsp_ioctl(int fd, unsigned long request, ...)
+static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 {
 	int result, err;
 	va_list args;
@@ -427,18 +433,19 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 	oss_dsp_stream_t *str;
 	snd_pcm_t *pcm;
 
-	va_start(args, request);
+	va_start(args, cmd);
 	arg = va_arg(args, void *);
 	va_end(args);
-	switch (request) {
+	DEBUG("ioctl(%d, ", fd);
+	switch (cmd) {
 	case OSS_GETVERSION:
 		*(int*)arg = SOUND_VERSION;
-		debug("OSS_GETVERSION %d\n", *(int*)arg);
+		DEBUG("OSS_GETVERSION, %p) -> [%d]\n", arg, *(int*)arg);
 		return 0;
 	case SNDCTL_DSP_RESET:
 	{
 		int k;
-		debug("SNDCTL_DSP_RESET\n");
+		DEBUG("SNDCTL_DSP_RESET)\n");
 		result = 0;
 		for (k = 0; k < 2; ++k) {
 			str = &dsp->streams[k];
@@ -461,7 +468,7 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 	case SNDCTL_DSP_SYNC:
 	{
 		int k;
-		debug("SNDCTL_DSP_SYNC\n");
+		DEBUG("SNDCTL_DSP_SYNC)\n");
 		result = 0;
 		for (k = 0; k < 2; ++k) {
 			str = &dsp->streams[k];
@@ -488,7 +495,7 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 			errno = -err;
 			return -1;
 		}
-		debug("SNDCTL_DSP_SPEED %d %d\n", *(int *)arg, dsp->rate);
+		DEBUG("SNDCTL_DSP_SPEED, %p[%d]) -> [%d]\n", arg, *(int *)arg, dsp->rate);
 		*(int *)arg = dsp->rate;
 		return 0;
 	case SNDCTL_DSP_STEREO:
@@ -501,7 +508,7 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 			errno = -err;
 			return -1;
 		}
-		debug("SNDCTL_DSP_STEREO %d %d\n", *(int *)arg, dsp->channels - 1);
+		DEBUG("SNDCTL_DSP_STEREO, %p[%d]) -> [%d]\n", arg, *(int *)arg, dsp->channels - 1);
 		*(int *)arg = dsp->channels - 1;
 		return 0;
 	case SNDCTL_DSP_CHANNELS:
@@ -511,7 +518,7 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 			errno = -err;
 			return -1;
 		}
-		debug("SNDCTL_DSP_CHANNELS %d %d\n", *(int *)arg, dsp->channels);
+		DEBUG("SNDCTL_DSP_CHANNELS, %p[%d]) -> [%d]\n", arg, *(int *)arg, dsp->channels);
 		*(int *)arg = dsp->channels;
 		return 0;
 	case SNDCTL_DSP_SETFMT:
@@ -523,7 +530,7 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 				return -1;
 			}
 		}
-		debug("SNDCTL_DSP_SETFMT %d %d\n", *(int *)arg, dsp->format);
+		DEBUG("SNDCTL_DSP_SETFMT, %p[%d]) -> [%d]\n", arg, *(int *)arg, dsp->format);
 		*(int *) arg = dsp->format;
 		return 0;
 	case SNDCTL_DSP_GETBLKSIZE:
@@ -532,13 +539,13 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 			str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 		pcm = str->pcm;
 		*(int *) arg = str->fragment_size * str->frame_bytes;
-		debug("SNDCTL_DSP_GETBLKSIZE %d\n", *(int *)arg);
+		DEBUG("SNDCTL_DSP_GETBLKSIZE, %p) -> [%d]\n", arg, *(int *)arg);
 		return 0;
 	case SNDCTL_DSP_POST:
-		debug("SNDCTL_DSP_POST\n");
+		DEBUG("SNDCTL_DSP_POST)\n");
 		return 0;
 	case SNDCTL_DSP_SUBDIVIDE:
-		debug("SNDCTL_DSP_SUBDIVIDE %d\n", *(int *)arg);
+		DEBUG("SNDCTL_DSP_SUBDIVIDE, %p[%d])\n", arg, *(int *)arg);
 		dsp->subdivision = *(int *)arg;
 		if (dsp->subdivision < 1)
 			dsp->subdivision = 1;
@@ -550,7 +557,7 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 		return 0;
 	case SNDCTL_DSP_SETFRAGMENT:
 	{
-		debug("SNDCTL_DSP_SETFRAGMENT %x\n", *(int *)arg);
+		DEBUG("SNDCTL_DSP_SETFRAGMENT, %p[%x])\n", arg, *(int *)arg);
 		dsp->fragshift = *(int *)arg & 0xffff;
 		if (dsp->fragshift < 4)
 			dsp->fragshift = 4;
@@ -566,16 +573,16 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 	}
 	case SNDCTL_DSP_GETFMTS:
 	{
-		debug("SNDCTL_DSP_GETFMTS\n");
 		*(int *)arg = (AFMT_MU_LAW | AFMT_A_LAW | AFMT_IMA_ADPCM | 
 			       AFMT_U8 | AFMT_S16_LE | AFMT_S16_BE | 
 			       AFMT_S8 | AFMT_U16_LE | AFMT_U16_BE);
+		DEBUG("SNDCTL_DSP_GETFMTS, %p) -> [%d]\n", arg, *(int *)arg);
 		return 0;
 	}
 	case SNDCTL_DSP_NONBLOCK:
 	{
 		int k;
-		debug("SNDCTL_DSP_NONBLOCK\n");
+		DEBUG("SNDCTL_DSP_NONBLOCK)\n");
 		result = 0;
 		for (k = 0; k < 2; ++k) {
 			pcm = dsp->streams[k].pcm;
@@ -598,7 +605,7 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 		    dsp->streams[SND_PCM_STREAM_CAPTURE].pcm)
 			result |= DSP_CAP_DUPLEX;
 		*(int*)arg = result;
-		debug("SNDCTL_DSP_GETCAPS %d\n", *(int*)arg);
+		DEBUG("SNDCTL_DSP_GETCAPS, %p) -> [%d]\n", arg, *(int*)arg);
 		return 0;
 	}
 	case SNDCTL_DSP_GETTRIGGER:
@@ -617,12 +624,12 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 				s |= PCM_ENABLE_INPUT;
 		}
 		*(int*)arg = s;
-		debug("SNDCTL_DSP_GETTRIGGER %d\n", *(int*)arg);
+		DEBUG("SNDCTL_DSP_GETTRIGGER, %p) -> [%d]\n", arg, *(int*)arg);
 		return 0;
 	}		
 	case SNDCTL_DSP_SETTRIGGER:
 	{
-		debug("SNDCTL_DSP_SETTRIGGER %d\n", *(int*)arg);
+		DEBUG("SNDCTL_DSP_SETTRIGGER, %p[%d])\n", arg, *(int*)arg);
 		result = *(int*) arg;
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
 		pcm = str->pcm;
@@ -674,10 +681,10 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 		info->fragstotal = str->fragments;
 		info->bytes = avail * str->frame_bytes;
 		info->fragments = avail / str->fragment_size;
-		debug("SNDCTL_DSP_GETISPACE %d %d %d %d\n", 
+		DEBUG("SNDCTL_DSP_GETISPACE, %p) -> {%d, %d, %d, %d}\n", arg,
 		      info->fragments,
 		      info->fragstotal,
-		      info->fragments,
+		      info->fragsize,
 		      info->bytes);
 		return 0;
 	}
@@ -701,10 +708,10 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 		info->fragstotal = str->fragments;
 		info->bytes = avail * str->frame_bytes;
 		info->fragments = avail / str->fragment_size;
-		debug("SNDCTL_DSP_GETOSPACE %d %d %d %d\n", 
+		DEBUG("SNDCTL_DSP_GETOSPACE, %p) -> {%d %d %d %d}\n", arg,
 		      info->fragments,
 		      info->fragstotal,
-		      info->fragments,
+		      info->fragsize,
 		      info->bytes);
 		return 0;
 	}
@@ -746,7 +753,7 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 			str->old_hw_ptr = hw_ptr;
 		} else
 			info->blocks = delay / str->fragment_size;
-		debug("SNDCTL_DSP_GETIPTR %d %d %d\n", 
+		DEBUG("SNDCTL_DSP_GETIPTR, %p) -> {%d %d %d}\n", arg,
 		      info->bytes,
 		      info->blocks,
 		      info->ptr);
@@ -790,7 +797,7 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 			str->old_hw_ptr = hw_ptr;
 		} else
 			info->blocks = delay / str->fragment_size;
-		debug("SNDCTL_DSP_GETOPTR %d %d %d\n", 
+		DEBUG("SNDCTL_DSP_GETOPTR, %p) -> {%d %d %d}\n", arg,
 		      info->bytes,
 		      info->blocks,
 		      info->ptr);
@@ -809,38 +816,52 @@ static int oss_dsp_ioctl(int fd, unsigned long request, ...)
 		    snd_pcm_delay(pcm, &delay) < 0)
 			delay = 0;
 		*(int *)arg = delay * str->frame_bytes;
-		debug("SNDCTL_DSP_GETODELAY %d\n", *(int*)arg); 
+		DEBUG("SNDCTL_DSP_GETODELAY, %p) -> [%d]\n", arg, *(int*)arg); 
 		return 0;
 	}
 	case SNDCTL_DSP_SETDUPLEX:
-		debug("SNDCTL_DSP_SETDUPLEX\n"); 
+		DEBUG("SNDCTL_DSP_SETDUPLEX)\n"); 
 		return 0;
 	case SOUND_PCM_READ_RATE:
 	{
 		*(int *)arg = dsp->rate;
-		debug("SOUND_PCM_READ_RATE %d\n", *(int*)arg); 
+		DEBUG("SOUND_PCM_READ_RATE, %p) -> [%d]\n", arg, *(int*)arg); 
 		return 0;
 	}
 	case SOUND_PCM_READ_CHANNELS:
 	{
 		*(int *)arg = dsp->channels;
-		debug("SOUND_PCM_READ_CHANNELS %d\n", *(int*)arg); 
+		DEBUG("SOUND_PCM_READ_CHANNELS, %p) -> [%d]\n", arg, *(int*)arg); 
 		return 0;
 	}
 	case SOUND_PCM_READ_BITS:
 	{
 		*(int *)arg = snd_pcm_format_width(oss_format_to_alsa(dsp->format));
-		debug("SOUND_PCM_READ_BITS %d\n", *(int*)arg); 
+		DEBUG("SOUND_PCM_READ_BITS, %p) -> [%d]\n", arg, *(int*)arg); 
 		return 0;
 	}
 	case SNDCTL_DSP_MAPINBUF:
+		DEBUG("SNDCTL_DSP_MAPINBUF)\n");
+		errno = EINVAL;
+		return -1;
 	case SNDCTL_DSP_MAPOUTBUF:
+		DEBUG("SNDCTL_DSP_MAPOUTBUF)\n");
+		errno = EINVAL;
+		return -1;
 	case SNDCTL_DSP_SETSYNCRO:
+		DEBUG("SNDCTL_DSP_SETSYNCRO)\n");
+		errno = EINVAL;
+		return -1;
 	case SOUND_PCM_READ_FILTER:
+		DEBUG("SOUND_PCM_READ_FILTER)\n");
+		errno = EINVAL;
+		return -1;
 	case SOUND_PCM_WRITE_FILTER:
+		DEBUG("SOUND_PCM_WRITE_FILTER)\n");
 		errno = EINVAL;
 		return -1;
 	default:
+		DEBUG("%lx, %p)\n", cmd, arg);
 		// return oss_mixer_ioctl(...);
 		errno = ENXIO;
 		return -1;
@@ -856,34 +877,39 @@ static int oss_dsp_fcntl(int fd, int cmd, ...)
 	va_start(args, cmd);
 	arg = va_arg(args, long);
 	va_end(args);
+	
+	DEBUG("fcntl(%d, ", fd);
 	result = _fcntl(fd, cmd, arg);
 	if (result < 0)
 		return result;
 	switch (cmd) {
 	case F_DUPFD:
+		DEBUG("F_DUPFD, %ld)\n", arg);
 		fds[arg] = fds[fd];
 		return result;
 	case F_SETFL:
-		if (arg & O_NONBLOCK) {
-			int k;
-			int err;
-			snd_pcm_t *pcm;
-			oss_dsp_t *dsp = fds[fd].private;
-			for (k = 0; k < 2; ++k) {
-				pcm = dsp->streams[k].pcm;
-				if (!pcm)
-					continue;
-				err = snd_pcm_nonblock(pcm, 1);
-				if (err < 0)
-					result = err;
-			}
-			if (result < 0) {
-				errno = -result;
-				return -1;
-			}
+	{
+		int k;
+		int err;
+		snd_pcm_t *pcm;
+		oss_dsp_t *dsp = fds[fd].private;
+		DEBUG("F_SETFL, %ld)\n", arg);
+		for (k = 0; k < 2; ++k) {
+			pcm = dsp->streams[k].pcm;
+			if (!pcm)
+				continue;
+			err = snd_pcm_nonblock(pcm, !!(arg & O_NONBLOCK));
+			if (err < 0)
+				result = err;
+		}
+		if (result < 0) {
+			errno = -result;
+			return -1;
 		}
 		return 0;
+	}
 	default:
+		DEBUG("%x, %ld)\n", cmd, arg);
 		return result;
 	}
 	return -1;
@@ -895,6 +921,7 @@ static void *oss_dsp_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUS
 	const snd_pcm_channel_area_t *areas;
 	oss_dsp_t *dsp = fds[fd].private;
 	oss_dsp_stream_t *str;
+	DEBUG("mmap(%p, %lu, %d, %d, %d, %ld)\n", addr, (unsigned long)len, prot, flags, fd, offset);
 	str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 	if (!str->pcm)
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
@@ -913,6 +940,7 @@ static int oss_dsp_munmap(int fd, void *addr ATTRIBUTE_UNUSED, size_t len ATTRIB
 	int err;
 	oss_dsp_t *dsp = fds[fd].private;
 	oss_dsp_stream_t *str;
+	DEBUG("munmap(%p, %lu)\n", addr, (unsigned long)len);
 	str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
 	if (!str->pcm)
 		str = &dsp->streams[SND_PCM_STREAM_CAPTURE];
@@ -973,7 +1001,7 @@ int open(const char *file, int oflag, ...)
 int close(int fd)
 {
 	int result;
-	if (fd < 0 || fd >= OPEN_MAX || fds[fd].class < 0)
+	if (fd < 0 || fd >= open_max || fds[fd].class < 0)
 		result = _close(fd);
 	else
 		result = ops[fds[fd].class].close(fd);
@@ -984,7 +1012,7 @@ int close(int fd)
 
 ssize_t write(int fd, const void *buf, size_t n)
 {
-	if (fd < 0 || fd >= OPEN_MAX || fds[fd].class < 0)
+	if (fd < 0 || fd >= open_max || fds[fd].class < 0)
 		return _write(fd, buf, n);
 	else
 		return ops[fds[fd].class].write(fd, buf, n);
@@ -992,7 +1020,7 @@ ssize_t write(int fd, const void *buf, size_t n)
 
 ssize_t read(int fd, void *buf, size_t n)
 {
-	if (fd < 0 || fd >= OPEN_MAX || fds[fd].class < 0)
+	if (fd < 0 || fd >= open_max || fds[fd].class < 0)
 		return _read(fd, buf, n);
 	else
 		return ops[fds[fd].class].read(fd, buf, n);
@@ -1006,7 +1034,7 @@ int ioctl(int fd, unsigned long request, ...)
 	va_start(args, request);
 	arg = va_arg(args, void *);
 	va_end(args);
-	if (fd < 0 || fd >= OPEN_MAX || fds[fd].class < 0)
+	if (fd < 0 || fd >= open_max || fds[fd].class < 0)
 		return _ioctl(fd, request, arg);
 	else 
 		return ops[fds[fd].class].ioctl(fd, request, arg);
@@ -1020,7 +1048,7 @@ int fcntl(int fd, int cmd, ...)
 	va_start(args, cmd);
 	arg = va_arg(args, void *);
 	va_end(args);
-	if (fd < 0 || fd >= OPEN_MAX || fds[fd].class < 0)
+	if (fd < 0 || fd >= open_max || fds[fd].class < 0)
 		return _fcntl(fd, cmd, arg);
 	else
 		return ops[fds[fd].class].fcntl(fd, cmd, arg);
@@ -1029,7 +1057,7 @@ int fcntl(int fd, int cmd, ...)
 void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
 {
 	void *result;
-	if (fd < 0 || fd >= OPEN_MAX || fds[fd].class < 0)
+	if (fd < 0 || fd >= open_max || fds[fd].class < 0)
 		return _mmap(addr, len, prot, flags, fd, offset);
 	result = ops[fds[fd].class].mmap(addr, len, prot, flags, fd, offset);
 	if (result != NULL && result != MAP_FAILED)
@@ -1040,14 +1068,16 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
 int munmap(void *addr, size_t len)
 {
 	int fd;
-	for (fd = 0; fd < OPEN_MAX; ++fd) {
+	for (fd = 0; fd < open_max; ++fd) {
 		if (fds[fd].mmap_area == addr)
 			break;
 	}
-	if (fd >= OPEN_MAX || fds[fd].class < 0)
+	if (fd >= open_max || fds[fd].class < 0)
 		return _munmap(addr, len);
-	else
+	else {
+		fds[fd].mmap_area = 0;
 		return ops[fds[fd].class].munmap(fd, addr, len);
+	}
 }
 
 #ifdef DEBUG_POLL
@@ -1116,7 +1146,7 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 	for (k = 0; k < nfds; ++k) {
 		int fd = pfds[k].fd;
 		pfds[k].revents = 0;
-		if (fd >= OPEN_MAX)
+		if (fd >= open_max)
 			goto _std1;
 		switch (fds[fd].class) {
 		case FD_OSS_DSP:
@@ -1148,10 +1178,12 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 	if (direct)
 		return _poll(pfds, nfds, timeout);
 #ifdef DEBUG_POLL
-	printf("Orig enter ");
-	dump_poll(pfds, nfds, timeout);
-	printf("Changed enter ");
-	dump_poll(pfds1, nfds1, timeout);
+	if (debug) {
+		printf("Orig enter ");
+		dump_poll(pfds, nfds, timeout);
+		printf("Changed enter ");
+		dump_poll(pfds1, nfds1, timeout);
+	}
 #endif
 	count = _poll(pfds1, nfds1, timeout);
 	if (count <= 0)
@@ -1161,7 +1193,7 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 	for (k = 0; k < nfds; ++k) {
 		int fd = pfds[k].fd;
 		unsigned int revents;
-		if (fd >= OPEN_MAX)
+		if (fd >= open_max)
 			goto _std2;
 		switch (fds[fd].class) {
 		case FD_OSS_DSP:
@@ -1190,10 +1222,12 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 			count1++;
 	}
 #ifdef DEBUG_POLL
-	printf("Changed exit ");
-	dump_poll(pfds1, nfds1, timeout);
-	printf("Orig exit ");
-	dump_poll(pfds, nfds, timeout);
+	if (debug) {
+		printf("Changed exit ");
+		dump_poll(pfds1, nfds1, timeout);
+		printf("Orig exit ");
+		dump_poll(pfds, nfds, timeout);
+	}
 #endif
 	return count1;
 }
@@ -1264,10 +1298,12 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 	if (direct)
 		return _select(nfds, rfds, wfds, efds, timeout);
 #ifdef DEBUG_SELECT
-	printf("Orig enter ");
-	dump_select(nfds, rfds, wfds, efds, timeout);
-	printf("Changed enter ");
-	dump_select(nfds1, rfds1, wfds1, efds1, timeout);
+	if (debug) {
+		printf("Orig enter ");
+		dump_select(nfds, rfds, wfds, efds, timeout);
+		printf("Changed enter ");
+		dump_select(nfds1, rfds1, wfds1, efds1, timeout);
+	}
 #endif
 	count = _select(nfds1, rfds1, wfds1, efds1, timeout);
 	if (count < 0)
@@ -1326,10 +1362,12 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 			count1++;
 	}
 #ifdef DEBUG_SELECT
-	printf("Changed exit ");
-	dump_select(nfds1, rfds1, wfds1, efds1, timeout);
-	printf("Orig exit ");
-	dump_select(nfds, rfds, wfds, efds, timeout);
+	if (debug) {
+		printf("Changed exit ");
+		dump_select(nfds1, rfds1, wfds1, efds1, timeout);
+		printf("Orig exit ");
+		dump_select(nfds, rfds, wfds, efds, timeout);
+	}
 #endif
 	return count1;
 }
@@ -1344,7 +1382,7 @@ int dup2(int fd, int fd2)
 {
 	int save;
 
-	if (fd2 < 0 || fd2 >= OPEN_MAX) {
+	if (fd2 < 0 || fd2 >= open_max) {
 		errno = EBADF;
 		return -1;
 	}
@@ -1384,6 +1422,15 @@ static void initialize() __attribute__ ((constructor));
 static void initialize()
 {
 	int k;
+	char *s = getenv("ALSA_OSS_DEBUG");
+	if (s)
+		debug = 1;
+	open_max = sysconf(_SC_OPEN_MAX);
+	if (open_max < 0)
+		exit(1);
+	fds = calloc(open_max, sizeof(*fds));
+	if (!fds)
+		exit(1);
 	_open = dlsym(RTLD_NEXT, "open");
 	_close = dlsym(RTLD_NEXT, "close");
 	_write = dlsym(RTLD_NEXT, "write");
@@ -1394,7 +1441,7 @@ static void initialize()
 	_munmap = dlsym(RTLD_NEXT, "munmap");
 	_select = dlsym(RTLD_NEXT, "select");
 	_poll = dlsym(RTLD_NEXT, "poll");
-	for (k = 0; k < OPEN_MAX; ++k) {
+	for (k = 0; k < open_max; ++k) {
 		fds[k].private = 0;
 		if (_fcntl(k, F_GETFL) < 0)
 			fds[k].class = FD_CLOSED;
