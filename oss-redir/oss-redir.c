@@ -59,7 +59,22 @@ static int (*x_oss_mixer_open)(const char *pathname, int flags);
 static int (*x_oss_mixer_close)(int fd);
 int (*oss_mixer_ioctl)(int fd, unsigned long int request, ...);
 
-int native_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds)
+static int native_pcm_nonblock(int fd, int nonblock)
+{
+	long flags;
+
+	if ((flags = fcntl(fd, F_GETFL)) < 0)
+		return -1;
+	if (nonblock)
+		flags |= O_NONBLOCK;
+	else
+		flags &= ~O_NONBLOCK;
+	if (fcntl(fd, F_SETFL, flags) < 0)
+		return -1;
+	return 0;
+}
+
+static int native_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds)
 {
 	if (fd < 0)
 		return -EINVAL;
@@ -70,7 +85,7 @@ int native_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds)
 	return 0;
 }
 
-int native_pcm_select_result(int fd, fd_set *readfds, fd_set *writefds)
+static int native_pcm_select_result(int fd, fd_set *readfds, fd_set *writefds)
 {
 	int result = 0;
 
@@ -83,14 +98,14 @@ int native_pcm_select_result(int fd, fd_set *readfds, fd_set *writefds)
 	return result;
 }
 
-int native_pcm_poll_fds(int fd)
+static int native_pcm_poll_fds(int fd)
 {
 	if (fd < 0)
 		return -EINVAL;
 	return 1;
 }
 
-int native_pcm_poll_prepare(int fd, struct pollfd *ufds)
+static int native_pcm_poll_prepare(int fd, struct pollfd *ufds)
 {
 	if (fd < 0)
 		return -EINVAL;
@@ -99,7 +114,7 @@ int native_pcm_poll_prepare(int fd, struct pollfd *ufds)
 	return 0;
 }
 
-int native_pcm_poll_result(int fd, struct pollfd *ufds)
+static int native_pcm_poll_result(int fd, struct pollfd *ufds)
 {
 	int result = 0;
 
@@ -197,6 +212,7 @@ static void initialize(void)
 	}
 	if (native_oss) {
 	      __native:
+	      	oss_pcm_nonblock = native_pcm_nonblock;
 		oss_pcm_read = read;
 		oss_pcm_write = write;
 		oss_pcm_mmap = mmap;
@@ -218,6 +234,7 @@ static void initialize(void)
 		}
 		x_oss_pcm_open = dlsym(dl_handle, "lib_oss_pcm_open");
 		x_oss_pcm_close = dlsym(dl_handle, "lib_oss_pcm_close");
+		oss_pcm_nonblock = dlsym(dl_handle, "lib_oss_pcm_nonblock");
 		oss_pcm_read = dlsym(dl_handle, "lib_oss_pcm_read");
 		oss_pcm_write = dlsym(dl_handle, "lib_oss_pcm_write");
 		oss_pcm_mmap = dlsym(dl_handle, "lib_oss_pcm_mmap");

@@ -30,6 +30,7 @@ struct pollfd;
 
 extern int oss_pcm_open(const char *pathname, int flags, ...);
 extern int oss_pcm_close(int fd);
+extern int (*oss_pcm_nonblock)(int fd, int nonblock);
 extern ssize_t (*oss_pcm_read)(int fd, void *buf, size_t count);
 extern ssize_t (*oss_pcm_write)(int fd, const void *buf, size_t count);
 extern void * (*oss_pcm_mmap)(void *start, size_t length, int prot, int flags, int fd, off_t offset);
