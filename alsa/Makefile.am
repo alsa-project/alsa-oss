@@ -8,10 +8,4 @@ noinst_HEADERS = alsa-oss-emul.h
 libaoss_la_SOURCES = alsa-oss.c
 libaoss_la_LIBADD = -ldl -lalsatoss
 
-libalsatoss_la_CFLAGS = @ALSA_CFLAGS@
 libalsatoss_la_SOURCES = pcm.c mixer.c
-libalsatoss_la_LDFLAGS = @ALSA_LDFLAGS@
-libalsatoss_la_LIBADD = @ALSA_LIBS@
-
-clean:
-	rm -f aoss
