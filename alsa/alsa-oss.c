@@ -30,16 +30,37 @@
 #include <sys/mman.h>
 #include <stdarg.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <dlfcn.h>
 #include <stdio.h>
-#include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
 #include <limits.h>
 #include <errno.h>
 #include <assert.h>
-#include <linux/soundcard.h>
-#include <alsa/asoundlib.h>
 
 #include "alsa-oss-emul.h"
+
+#ifndef ATTRIBUTE_UNUSED
+/** do not print warning (gcc) when function parameter is not used */
+#define ATTRIBUTE_UNUSED __attribute__ ((__unused__))
+#endif
+
+#if 1
+#define DEBUG_POLL
+#define DEBUG_SELECT
+#ifdef NEW_MACRO_VARARGS
+#define DEBUG(...) do { if (oss_wrapper_debug) fprintf(stderr, __VA_ARGS__); } while (0)
+#else /* !NEW_MACRO_VARARGS */
+#define DEBUG(args...) do { if (oss_wrapper_debug) fprintf(stderr, ##args); } while (0)
+#endif
+#else
+#ifdef NEW_MACRO_VARARGS
+#define DEBUG(...)
+#else /* !NEW_MACRO_VARARGS */
+#define DEBUG(args...)
+#endif
+#endif
 
 int (*_select)(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
 int (*_poll)(struct pollfd *ufds, unsigned int nfds, int timeout);
@@ -76,6 +97,7 @@ typedef struct {
 	void *mmap_area;
 } fd_t;
 
+static int oss_wrapper_debug = 0;
 static int open_max;
 static int poll_fds_add = 0;
 static fd_t **fds;
@@ -407,7 +429,7 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 	if (direct)
 		return _poll(pfds, nfds, timeout);
 #ifdef DEBUG_POLL
-	if (alsa_oss_debug) {
+	if (oss_wrapper_debug) {
 		fprintf(stderr, "Orig enter ");
 		dump_poll(pfds, nfds, timeout);
 		fprintf(stderr, "Changed enter ");
@@ -450,7 +472,7 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 			count1++;
 	}
 #ifdef DEBUG_POLL
-	if (alsa_oss_debug) {
+	if (oss_wrapper_debug) {
 		fprintf(stderr, "Changed exit ");
 		dump_poll(pfds1, nfds1, timeout);
 		fprintf(stderr, "Orig exit ");
@@ -529,7 +551,7 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 	if (direct)
 		return _select(nfds, rfds, wfds, efds, timeout);
 #ifdef DEBUG_SELECT
-	if (alsa_oss_debug) {
+	if (oss_wrapper_debug) {
 		fprintf(stderr, "Orig enter ");
 		dump_select(nfds, rfds, wfds, efds, timeout);
 		fprintf(stderr, "Changed enter ");
@@ -598,7 +620,7 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 			count1++;
 	}
 #ifdef DEBUG_SELECT
-	if (alsa_oss_debug) {
+	if (oss_wrapper_debug) {
 		fprintf(stderr, "Changed exit ");
 		dump_select(nfds1, rfds1, wfds1, efds1, timeout);
 		fprintf(stderr, "Orig exit ");
@@ -676,7 +698,7 @@ static void initialize()
 		return;
 	s = getenv("ALSA_OSS_DEBUG");
 	if (s)
-		alsa_oss_debug = 1;
+		oss_wrapper_debug = 1;
 	open_max = sysconf(_SC_OPEN_MAX);
 	if (open_max < 0)
 		exit(1);

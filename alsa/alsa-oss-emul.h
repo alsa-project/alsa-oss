@@ -24,22 +24,6 @@
 #define NEW_MACRO_VARARGS
 #endif
 
-#if 1
-#define DEBUG_POLL
-#define DEBUG_SELECT
-#ifdef NEW_MACRO_VARARGS
-#define DEBUG(...) do { if (alsa_oss_debug) fprintf(stderr, __VA_ARGS__); } while (0)
-#else /* !NEW_MACRO_VARARGS */
-#define DEBUG(args...) do { if (alsa_oss_debug) fprintf(stderr, ##args); } while (0)
-#endif
-#else
-#ifdef NEW_MACRO_VARARGS
-#define DEBUG(...)
-#else /* !NEW_MACRO_VARARGS */
-#define DEBUG(args...)
-#endif
-#endif
-
 #define OSS_MAJOR		14
 #define OSS_DEVICE_MIXER	0
 #define OSS_DEVICE_SEQUENCER	1
@@ -77,8 +61,5 @@ extern int lib_oss_pcm_poll_result(int fd, struct pollfd *ufds);
 extern int lib_oss_mixer_open(const char *pathname, int flags, ...);
 extern int lib_oss_mixer_close(int fd);
 extern int lib_oss_mixer_ioctl(int fd, unsigned long int request, ...);
-
-extern int alsa_oss_debug;
-extern snd_output_t *alsa_oss_debug_out;
 
 #endif /* __ALSA_OSS_EMUL_H */

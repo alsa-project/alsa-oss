@@ -38,7 +38,7 @@
 #include <linux/soundcard.h>
 #include <alsa/asoundlib.h>
 
-#include "alsa-oss-emul.h"
+#include "alsa-local.h"
 
 int alsa_oss_debug = 0;
 snd_output_t *alsa_oss_debug_out = NULL;

@@ -38,7 +38,7 @@
 #include <linux/soundcard.h>
 #include <alsa/asoundlib.h>
 
-#include "alsa-oss-emul.h"
+#include "alsa-local.h"
 
 typedef struct _oss_mixer {
 	int fileno;
