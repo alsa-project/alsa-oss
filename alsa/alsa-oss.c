@@ -693,10 +693,7 @@ static void initialize() __attribute__ ((constructor));
 
 static void initialize()
 {
-	char *s = getenv("ALSA_OSS_WRAPPER");
-	if (s == NULL)
-		return;
-	s = getenv("ALSA_OSS_DEBUG");
+	char *s = getenv("ALSA_OSS_DEBUG");
 	if (s)
 		oss_wrapper_debug = 1;
 	open_max = sysconf(_SC_OPEN_MAX);

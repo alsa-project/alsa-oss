@@ -6,4 +6,4 @@
 
 prefix=@prefix@
 exec_prefix=@exec_prefix@
-ALSA_OSS_WRAPPER=1 LD_PRELOAD=@libdir@/libaoss.so exec "$@"
+LD_PRELOAD=@libdir@/libaoss.so exec "$@"
