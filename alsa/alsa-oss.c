@@ -73,7 +73,6 @@ static ops_t ops[FD_CLASSES];
 typedef struct {
 	int count;
 	fd_class_t class;
-	void *private;
 	void *mmap_area;
 } fd_t;
 
@@ -195,6 +194,12 @@ int open(const char *file, int oflag, ...)
 	    !strncmp(file, "/dev/audio", 10)) {
 		fd = lib_oss_pcm_open(file, oflag);
 		if (fd >= 0) {
+			fds[fd] = calloc(sizeof(fd_t), 1);
+			if (fds[fd] == NULL) {
+				ops[FD_OSS_DSP].close(fd);
+				errno = ENOMEM;
+				return -1;
+			}
 			fds[fd]->class = FD_OSS_DSP;
 			poll_fds_add += lib_oss_pcm_poll_fds(fd);
 		}
@@ -216,7 +221,7 @@ int close(int fd)
 	} else {
 		fd_t *xfd = fds[fd];
 		int err;
-		
+
 		fds[fd] = NULL;
 		poll_fds_add -= lib_oss_pcm_poll_fds(fd);
 		err = ops[xfd->class].close(fd);
@@ -251,7 +256,7 @@ int ioctl(int fd, unsigned long request, ...)
 	va_end(args);
 	if (fd < 0 || fd >= open_max || fds[fd] == NULL)
 		return _ioctl(fd, request, arg);
-	else 
+	else
 		return ops[fds[fd]->class].ioctl(fd, request, arg);
 }
 

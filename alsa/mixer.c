@@ -245,7 +245,7 @@ static int oss_mixer_open(int card, int device, int oflag, mode_t mode ATTRIBUTE
 	result = snd_mixer_load(mixer->mix);
 	if (result < 0)
 		goto _error1;
-	mixer->fileno = result;
+	mixer->fileno = fd;
 	insert_fd(mixer);
 	return fd;
  _error1:

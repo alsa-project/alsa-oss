@@ -549,7 +549,7 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 	result = oss_dsp_params(dsp);
 	if (result < 0)
 		goto _error;
-	xfd->fileno = result;
+	xfd->fileno = fd;
 	insert_fd(xfd);
 	return fd;
 
@@ -1263,6 +1263,196 @@ int lib_oss_pcm_munmap(void *addr, size_t len)
 	}
 	return 0;
 }
+
+int lib_oss_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds)
+{
+	oss_dsp_t *dsp = look_for_dsp(fd);
+	int k;
+
+	if (dsp == NULL) {
+		errno = EBADFD;
+		return -1;
+	}
+	for (k = 0; k < 2; ++k) {
+		snd_pcm_t *pcm = dsp->streams[k].pcm;
+		int err, count;
+		if (!pcm)
+			continue;
+		count = snd_pcm_poll_descriptors_count(pcm);
+		if (count < 0) {
+			errno = -count;
+			return -1;
+		}
+		{
+			struct pollfd ufds[count];
+			int j;
+			err = snd_pcm_poll_descriptors(pcm, ufds, count);
+			if (err < 0) {
+				errno = -err;
+				return -1;
+			}
+			for (j = 0; j < count; j++) {
+				int fd = ufds[j].fd;
+				unsigned short events = ufds[j].events;
+				FD_CLR(fd, readfds);
+				FD_CLR(fd, writefds);
+				FD_CLR(fd, exceptfds);
+				if (events & POLLIN)
+					FD_SET(fd, readfds);
+				if (events & POLLOUT)
+					FD_SET(fd, writefds);
+				if (events & (POLLERR|POLLNVAL))
+					FD_SET(fd, exceptfds);
+			}
+		}
+	}	
+	return 0;
+}
+
+int lib_oss_pcm_select_result(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds)
+{
+	oss_dsp_t *dsp = look_for_dsp(fd);
+	int k, result = 0;
+
+	if (dsp == NULL) {
+		errno = EBADFD;
+		return -1;
+	}
+	for (k = 0; k < 2; ++k) {
+		snd_pcm_t *pcm = dsp->streams[k].pcm;
+		int err, count;
+		if (!pcm)
+			continue;
+		count = snd_pcm_poll_descriptors_count(pcm);
+		if (count < 0) {
+			errno = -count;
+			return -1;
+		}
+		{
+			struct pollfd ufds[count];
+			int j;
+			unsigned short revents;
+			err = snd_pcm_poll_descriptors(pcm, ufds, count);
+			if (err < 0) {
+				errno = -err;
+				return -1;
+			}
+			for (j = 0; j < count; j++) {
+				int fd = ufds[j].fd;
+				revents = 0;
+				if (FD_ISSET(fd, readfds))
+					revents |= POLLIN;
+				if (FD_ISSET(fd, writefds))
+					revents |= POLLOUT;
+				if (FD_ISSET(fd, exceptfds))
+					revents |= POLLERR;
+				ufds[j].revents = revents;
+			}
+			err = snd_pcm_poll_descriptors_revents(pcm, ufds, count, &revents);
+			if (err < 0) {
+				errno = -err;
+				return -1;
+			}
+			if (revents & (POLLNVAL|POLLERR))
+				result |= OSS_WAIT_EVENT_ERROR;
+			if (revents & POLLIN)
+				result |= OSS_WAIT_EVENT_READ;
+			if (revents & POLLIN)
+				result |= OSS_WAIT_EVENT_WRITE;
+		}
+	}	
+	return result;
+}
+
+extern int lib_oss_pcm_poll_fds(int fd)
+{
+	oss_dsp_t *dsp = look_for_dsp(fd);
+	int k, result = 0;
+
+	if (dsp == NULL) {
+		errno = EBADFD;
+		return -1;
+	}
+	for (k = 0; k < 2; ++k) {
+		snd_pcm_t *pcm = dsp->streams[k].pcm;
+		int err;
+		if (!pcm)
+			continue;
+		err = snd_pcm_poll_descriptors_count(pcm);
+		if (err < 0) {
+			errno = -err;
+			return -1;
+		}
+		result += err;
+	}	
+	return result;
+}
+
+int lib_oss_pcm_poll_prepare(int fd, struct pollfd *ufds)
+{
+	oss_dsp_t *dsp = look_for_dsp(fd);
+	int k;
+
+	if (dsp == NULL) {
+		errno = EBADFD;
+		return -1;
+	}
+	for (k = 0; k < 2; ++k) {
+		snd_pcm_t *pcm = dsp->streams[k].pcm;
+		int err, count;
+		if (!pcm)
+			continue;
+		count = snd_pcm_poll_descriptors_count(pcm);
+		if (count < 0) {
+			errno = -count;
+			return -1;
+		}
+		err = snd_pcm_poll_descriptors(pcm, ufds, count);
+		if (err < 0) {
+			errno = -err;
+			return -1;
+		}
+		ufds += count;
+	}	
+	return 0;
+}
+
+int lib_oss_pcm_poll_result(int fd, struct pollfd *ufds)
+{
+	oss_dsp_t *dsp = look_for_dsp(fd);
+	int k, result = 0;
+
+	if (dsp == NULL) {
+		errno = EBADFD;
+		return -1;
+	}
+	for (k = 0; k < 2; ++k) {
+		snd_pcm_t *pcm = dsp->streams[k].pcm;
+		int err, count;
+		unsigned short revents;
+		if (!pcm)
+			continue;
+		count = snd_pcm_poll_descriptors_count(pcm);
+		if (count < 0) {
+			errno = -count;
+			return -1;
+		}
+		err = snd_pcm_poll_descriptors_revents(pcm, ufds, count, &revents);
+		if (err < 0) {
+			errno = -err;
+			return -1;
+		}
+		if (revents & (POLLNVAL|POLLERR))
+			result |= OSS_WAIT_EVENT_ERROR;
+		if (revents & POLLIN)
+			result |= OSS_WAIT_EVENT_READ;
+		if (revents & POLLIN)
+			result |= OSS_WAIT_EVENT_WRITE;
+		ufds += count;
+	}	
+	return result;
+}
+
 
 static void error_handler(const char *file ATTRIBUTE_UNUSED,
 			  int line ATTRIBUTE_UNUSED,
