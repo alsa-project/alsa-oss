@@ -402,7 +402,7 @@ void dump_select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 	int k;
 	fprintf(stderr, "SELECT nfds: %d, ", nfds);
 	if (timeout)
-		fprintf(stderr, "timeout: %ld.%06ld\n", timeout->tv_sec, timeout->tv_usec);
+		fprintf(stderr, "timeout: %ld.%06ld\n", (long)timeout->tv_sec, (long)timeout->tv_usec);
 	else
 		fprintf(stderr, "no timeout\n");
 	if (rfds) {
