@@ -260,6 +260,8 @@ static int oss_dsp_sw_params(oss_dsp_t *dsp)
 		if (!pcm)
 			continue;
 		snd_pcm_sw_params_current(pcm, &sw);
+		snd_pcm_sw_param_set(pcm, &sw,
+				     SND_PCM_SW_PARAM_XFER_ALIGN, 1);
 		if (str->disabled)
 			snd_pcm_sw_param_set(pcm, &sw, 
 					     SND_PCM_SW_PARAM_START_MODE, 
