@@ -147,7 +147,7 @@ static void *bad_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUSED,
 		      int fd ATTRIBUTE_UNUSED, off_t offset ATTRIBUTE_UNUSED)
 {
 	errno = EBADFD;
-	return NULL;
+	return MAP_FAILED;
 }
 
 static int bad_munmap(void* addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUSED)

@@ -1192,7 +1192,7 @@ void * lib_oss_pcm_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUSED
 
 	if (dsp == NULL) {
 		errno = -EBADFD;
-		return NULL;
+		return MAP_FAILED;
 	}
 	switch (prot & (PROT_READ | PROT_WRITE)) {
 	case PROT_READ:
