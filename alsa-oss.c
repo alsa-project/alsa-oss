@@ -433,12 +433,34 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 	dsp->channels = 1;
 	dsp->rate = 8000;
 	dsp->oss_format = format;
+	result = -EINVAL;
 	for (k = 0; k < 2; ++k) {
 		if (!(streams & (1 << k)))
 			continue;
 		result = snd_pcm_open(&dsp->streams[k].pcm, name, k, pcm_mode);
 		if (result < 0)
-			goto _error;
+			break;
+	}
+	if (result < 0) {
+		result = 0;
+		for (k = 0; k < 2; ++k) {
+			if (dsp->streams[k].pcm) {
+				snd_pcm_close(dsp->streams[k].pcm);
+				dsp->streams[k].pcm = NULL;
+			}
+		}
+		/* try to open the default pcm as fallback */
+		if (card == 0 && (device == OSS_DEVICE_DSP || device == OSS_DEVICE_AUDIO))
+			strcpy(name, "default");
+		else
+			sprintf(name, "plughw:%d", card);
+		for (k = 0; k < 2; ++k) {
+			if (!(streams & (1 << k)))
+				continue;
+			result = snd_pcm_open(&dsp->streams[k].pcm, name, k, pcm_mode);
+			if (result < 0)
+				goto _error;
+		}
 	}
 	result = oss_dsp_params(dsp);
 	if (result < 0)
@@ -586,8 +608,16 @@ static int oss_mixer_open(int card, int device, int oflag, mode_t mode ATTRIBUTE
 	if (result < 0)
 		goto _error;
 	result = snd_mixer_attach(mixer->mix, name);
-	if (result < 0)
-		goto _error1;
+	if (result < 0) {
+		/* try to open the default mixer as fallback */
+		if (card == 0)
+			strcpy(name, "default");
+		else
+			sprintf(name, "hw:%d", card);
+		result = snd_mixer_attach(mixer->mix, name);
+		if (result < 0)
+			goto _error1;
+	}
 	result = snd_mixer_selem_register(mixer->mix, NULL, NULL);
 	if (result < 0)
 		goto _error1;
@@ -605,6 +635,16 @@ static int oss_mixer_open(int card, int device, int oflag, mode_t mode ATTRIBUTE
 	return -1;
 }
 
+static void error_handler(const char *file ATTRIBUTE_UNUSED,
+			  int line ATTRIBUTE_UNUSED,
+			  const char *func ATTRIBUTE_UNUSED,
+			  int err ATTRIBUTE_UNUSED,
+			  const char *fmt ATTRIBUTE_UNUSED,
+			  ...)
+{
+	/* suppress the error message from alsa-lib */
+}
+
 static int oss_open(const char *file, int oflag, ...)
 {
 	int result;
@@ -620,6 +660,8 @@ static int oss_open(const char *file, int oflag, ...)
 		return RETRY;
 	if (!S_ISCHR(s.st_mode) || ((s.st_rdev >> 8) & 0xff) != OSS_MAJOR)
 		return RETRY;
+	if (! debug)
+		snd_lib_error_set_handler(error_handler);
 	minor = s.st_rdev & 0xff;
 	card = minor >> 4;
 	device = minor & 0x0f;
