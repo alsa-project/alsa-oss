@@ -653,7 +653,7 @@ static ssize_t oss_dsp_read(int fd, void *buf, size_t n)
 	}
 	frames = n / str->frame_bytes;
  _again:
-	result = snd_pcm_readi(pcm, buf, n);
+	result = snd_pcm_readi(pcm, buf, frames);
 	if (result == -EPIPE && 
 	    snd_pcm_state(pcm) == SND_PCM_STATE_XRUN &&
 	    (result = snd_pcm_prepare(pcm)) == 0)
