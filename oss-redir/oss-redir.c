@@ -81,11 +81,13 @@ static int native_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds, 
 		return -EINVAL;
 	if (readfds) {
 		FD_SET(fd, readfds);
-		FD_SET(fd, exceptfds);
+		if (exceptfds)
+			FD_SET(fd, exceptfds);
 	}
 	if (writefds) {
 		FD_SET(fd, writefds);
-		FD_SET(fd, exceptfds);
+		if (exceptfds)
+			FD_SET(fd, exceptfds);
 	}
 	return 0;
 }

@@ -1294,15 +1294,21 @@ int lib_oss_pcm_select_prepare(int fd, fd_set *readfds, fd_set *writefds, fd_set
 			for (j = 0; j < count; j++) {
 				int fd = ufds[j].fd;
 				unsigned short events = ufds[j].events;
-				FD_CLR(fd, readfds);
-				FD_CLR(fd, writefds);
-				FD_CLR(fd, exceptfds);
-				if (events & POLLIN)
-					FD_SET(fd, readfds);
-				if (events & POLLOUT)
-					FD_SET(fd, writefds);
-				if (events & (POLLERR|POLLNVAL))
-					FD_SET(fd, exceptfds);
+				if (readfds) {
+					FD_CLR(fd, readfds);
+					if (events & POLLIN)
+						FD_SET(fd, readfds);
+				}
+				if (writefds) {
+					FD_CLR(fd, writefds);
+					if (events & POLLOUT)
+						FD_SET(fd, writefds);
+				}
+				if (exceptfds) {
+					FD_CLR(fd, exceptfds);
+					if (events & (POLLERR|POLLNVAL))
+						FD_SET(fd, exceptfds);
+				}
 			}
 		}
 	}	
@@ -1340,11 +1346,11 @@ int lib_oss_pcm_select_result(int fd, fd_set *readfds, fd_set *writefds, fd_set 
 			for (j = 0; j < count; j++) {
 				int fd = ufds[j].fd;
 				revents = 0;
-				if (FD_ISSET(fd, readfds))
+				if (readfds && FD_ISSET(fd, readfds))
 					revents |= POLLIN;
-				if (FD_ISSET(fd, writefds))
+				if (writefds && FD_ISSET(fd, writefds))
 					revents |= POLLOUT;
-				if (FD_ISSET(fd, exceptfds))
+				if (exceptfds && FD_ISSET(fd, exceptfds))
 					revents |= POLLERR;
 				ufds[j].revents = revents;
 			}
