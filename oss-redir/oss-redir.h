@@ -28,8 +28,8 @@ struct pollfd;
 #define OSS_WAIT_EVENT_READ	(1<<0)
 #define OSS_WAIT_EVENT_WRITE	(1<<1)
 
-extern int (*oss_pcm_open)(const char *pathname, int flags, ...);
-extern int (*oss_pcm_close)(int fd);
+extern int oss_pcm_open(const char *pathname, int flags, ...);
+extern int oss_pcm_close(int fd);
 extern ssize_t (*oss_pcm_read)(int fd, void *buf, size_t count);
 extern ssize_t (*oss_pcm_write)(int fd, const void *buf, size_t count);
 extern void * (*oss_pcm_mmap)(void *start, size_t length, int prot, int flags, int fd, off_t offset);
@@ -41,8 +41,8 @@ extern int (*oss_pcm_poll_fds)(int fd);
 extern int (*oss_pcm_poll_prepare)(int fd, struct pollfd *ufds);
 extern int (*oss_pcm_poll_result)(int fd, struct pollfd *ufds);
 
-extern int (*oss_mixer_open)(const char *pathname, int flags, ...);
-extern int (*oss_mixer_close)(int fd);
+extern int oss_mixer_open(const char *pathname, int flags, ...);
+extern int oss_mixer_close(int fd);
 extern int (*oss_mixer_ioctl)(int fd, unsigned long int request, ...);
 
 
