@@ -1,6 +1,8 @@
 AC_INIT(alsa-oss.c)
 AM_INIT_AUTOMAKE(alsa-oss, 0.9.0beta8)
 
+AC_PREFIX_DEFAULT(/usr)
+
 AC_PROG_CC
 AC_PROG_INSTALL
 AC_PROG_LN_S 
