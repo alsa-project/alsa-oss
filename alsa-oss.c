@@ -42,6 +42,7 @@ snd_pcm_uframes_t _snd_pcm_boundary(snd_pcm_t *pcm);
 snd_pcm_uframes_t _snd_pcm_mmap_hw_ptr(snd_pcm_t *pcm);
 
 static int debug = 0;
+static snd_output_t *debug_out = NULL;
 
 #if __GNUC__ > 2 || (__GNUC__ == 2 && __GNUC_MINOR__ >= 95)
 #define NEW_MACRO_VARARGS
@@ -213,14 +214,15 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 		err = snd_pcm_hw_params_set_channels(pcm, hw, dsp->channels);
 		if (err < 0)
 			return err;
-
-		err = snd_pcm_hw_params_set_periods_integer(pcm, hw);
-		if (err < 0)
-			return err;
 		rate = dsp->rate;
 		err = snd_pcm_hw_params_set_rate_near(pcm, hw, &rate, 0);
 		if (err < 0)
 			return err;
+#if 0
+		err = snd_pcm_hw_params_set_periods_integer(pcm, hw);
+		if (err < 0)
+			return err;
+#endif
 
 		if (str->mmap_buffer) {
 			snd_pcm_access_mask_t *mask;
@@ -258,12 +260,31 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 			}
 			if (dsp->fragshift > 0) {
 				snd_pcm_uframes_t s = (1 << dsp->fragshift) / str->frame_bytes;
-				err = snd_pcm_hw_params_set_period_size_near(pcm, hw, &s, 0);
+				s *= 16;
+				while (s >= 1024 && (err = snd_pcm_hw_params_set_buffer_size(pcm, hw, s)) < 0)
+					s /= 2;
+				s = (1 << dsp->fragshift) / str->frame_bytes;
+				while (s >= 256 && (err = snd_pcm_hw_params_set_period_size(pcm, hw, s, 0)) < 0)
+					s /= 2;
+				if (err < 0) {
+					s = (1 << dsp->fragshift) / str->frame_bytes;
+					err = snd_pcm_hw_params_set_period_size_near(pcm, hw, &s, 0);
+				}
+				fprintf(stderr, "set period size = %li, err = %i\n", s, err);
 			} else {
-				snd_pcm_uframes_t s = 16;
-				while (s * 2 < dsp->rate / 4) 
+				snd_pcm_uframes_t s = 16, old_s;
+				while (s * 2 < dsp->rate / 2) 
 					s *= 2;
-				err = snd_pcm_hw_params_set_period_size_near(pcm, hw, &s, 0);
+				old_s = s = s / 2;
+				while (s >= 1024 && (err = snd_pcm_hw_params_set_buffer_size(pcm, hw, s)) < 0)
+					s /= 2;
+				s = old_s;
+				while (s >= 256 && (err = snd_pcm_hw_params_set_period_size(pcm, hw, s, 0)) < 0)
+					s /= 2;
+				if (err < 0) {
+					s = old_s;
+					err = snd_pcm_hw_params_set_period_size_near(pcm, hw, &s, 0);
+				}
 			}
 			if (err < 0)
 				return err;
@@ -351,6 +372,16 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 	err = oss_dsp_sw_params(dsp);
 	if (err < 0) 
 		return err;
+#if 0
+	if (debug && debug_out) {
+		int k;
+		for (k = 1; k >= 0; --k) {
+			oss_dsp_stream_t *str = &dsp->streams[k];
+			if (str->pcm)
+				snd_pcm_dump(str->pcm, debug_out);
+		}
+	}
+#endif
 	return 0;
 }
 
@@ -395,6 +426,10 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 	int result;
 	char name[64];
 
+	if (debug_out == NULL) {
+		if (snd_output_stdio_attach(&debug_out, stderr, 0) < 0)
+			debug_out = NULL;
+	}
 	switch (device) {
 	case OSS_DEVICE_DSP:
 		format = AFMT_U8;
@@ -714,6 +749,13 @@ static ssize_t oss_dsp_write(int fd, const void *buf, size_t n)
 	    snd_pcm_state(pcm) == SND_PCM_STATE_XRUN &&
 	    (result = snd_pcm_prepare(pcm)) == 0)
 		goto _again;
+	if (result == -EPIPE && 
+	    snd_pcm_state(pcm) == SND_PCM_STATE_SUSPENDED) {
+	    	while ((result = snd_pcm_resume(pcm)) == -EAGAIN)
+	    		sleep(1);
+	    	if (result < 0 && (result = snd_pcm_prepare(pcm)) == 0)
+	    		goto _again;
+	}
 	if (result < 0) {
 		errno = -result;
 		result = -1;
@@ -749,6 +791,13 @@ static ssize_t oss_dsp_read(int fd, void *buf, size_t n)
 	    snd_pcm_state(pcm) == SND_PCM_STATE_XRUN &&
 	    (result = snd_pcm_prepare(pcm)) == 0)
 		goto _again;
+	if (result == -EPIPE && 
+	    snd_pcm_state(pcm) == SND_PCM_STATE_SUSPENDED) {
+	    	while ((result = snd_pcm_resume(pcm)) == -EAGAIN)
+	    		sleep(1);
+	    	if (result < 0 && (result = snd_pcm_prepare(pcm)) == 0)
+	    		goto _again;
+	}
 	if (result < 0) {
 		errno = -result;
 		result = -1;
