@@ -705,6 +705,8 @@ static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
 			/* fallback to not very accurate method */
 			size = str->mmap_advance - delay;
 		} else {
+			str->alsa.appl_ptr -= err;
+			str->alsa.appl_ptr %= str->alsa.boundary;
 			size = str->mmap_advance;
 		}
 //		fprintf(stderr, "delay=%ld rewind=%ld forward=%ld\n",
