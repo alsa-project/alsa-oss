@@ -199,7 +199,7 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 		snd_pcm_t *pcm = str->pcm;
 		snd_pcm_hw_params_t *hw;
 		int err;
-		unsigned int periods_min;
+		unsigned int rate, periods_min;
 		if (!pcm)
 			continue;
 		str->frame_bytes = snd_pcm_format_physical_width(dsp->format) * dsp->channels / 8;
@@ -217,7 +217,8 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 		err = snd_pcm_hw_params_set_periods_integer(pcm, hw);
 		if (err < 0)
 			return err;
-		err = snd_pcm_hw_params_set_rate_near(pcm, hw, dsp->rate, 0);
+		rate = dsp->rate;
+		err = snd_pcm_hw_params_set_rate_near(pcm, hw, &rate, 0);
 		assert(err >= 0);
 
 		if (str->mmap_buffer) {
@@ -254,15 +255,17 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 				if (err < 0)
 					return err;
 			}
-			if (dsp->fragshift > 0)
-				err = snd_pcm_hw_params_set_period_size_near(pcm, hw, (1 << dsp->fragshift) / str->frame_bytes, 0);
-			else {
+			if (dsp->fragshift > 0) {
+				snd_pcm_uframes_t s = (1 << dsp->fragshift) / str->frame_bytes;
+				err = snd_pcm_hw_params_set_period_size_near(pcm, hw, &s, 0);
+			} else {
 				snd_pcm_uframes_t s = 16;
 				while (s * 2 < dsp->rate / 4) 
 					s *= 2;
-				err = snd_pcm_hw_params_set_period_size_near(pcm, hw, s, 0);
+				err = snd_pcm_hw_params_set_period_size_near(pcm, hw, &s, 0);
 			}
-			assert(err >= 0);
+			if (err < 0)
+				return err;
 		}
 
 		err = snd_pcm_hw_params(pcm, hw);
@@ -272,10 +275,16 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 		if (debug)
 			snd_pcm_dump_setup(pcm, stderr);
 #endif
-		dsp->rate = snd_pcm_hw_params_get_rate(hw, 0);
+		err = snd_pcm_hw_params_get_rate(hw, &dsp->rate, 0);
+		if (err < 0)
+			return err;
 		dsp->oss_format = alsa_format_to_oss(dsp->format);
-		str->period_size = snd_pcm_hw_params_get_period_size(hw, 0);
-		str->periods = snd_pcm_hw_params_get_periods(hw, 0);
+		err = snd_pcm_hw_params_get_period_size(hw, &str->period_size, 0);
+		if (err < 0)
+			return err;
+		err = snd_pcm_hw_params_get_periods(hw, &str->periods, 0);
+		if (err < 0)
+			return err;
 		str->buffer_size = str->periods * str->period_size;
 		free(str->mmap_areas);
 		str->mmap_areas = 0;
