@@ -1,4 +1,4 @@
-ossredirincludedir = ${includedir}/sound
+ossredirincludedir = ${includedir}
 
 ossredirinclude_HEADERS = oss-redir.h
 
