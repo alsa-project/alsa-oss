@@ -267,7 +267,8 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 			if (err < 0)
 				return err;
 			if (dsp->maxfrags > 0) {
-				unsigned int periods_max = dsp->maxfrags;
+				unsigned int periods_max = periods_min > dsp->maxfrags
+					? periods_min : dsp->maxfrags;
 				err = snd_pcm_hw_params_set_periods_max(pcm, hw,
 									&periods_max, 0);
 				if (err < 0)
