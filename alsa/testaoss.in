@@ -5,4 +5,5 @@
 #	testaoss <command> <command options and arguments>
 
 prefix=@top_srcdir@
-ALSA_OSS_WRAPPER=1 LD_PRELOAD=${prefix}/alsa/.libs/libaoss.so $*
+ALSA_OSS_WRAPPER=1 LD_PRELOAD=${prefix}/alsa/.libs/libaoss.so exec "$@"
+
