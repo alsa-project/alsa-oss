@@ -534,7 +534,7 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 		errno = ENOENT;
 		return -1;
 	}
-	if (mode & O_NONBLOCK)
+	if (oflag & O_NONBLOCK)
 		pcm_mode = SND_PCM_NONBLOCK;
 	switch (oflag & O_ACCMODE) {
 	case O_RDONLY:
