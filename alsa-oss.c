@@ -219,7 +219,8 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 			return err;
 		rate = dsp->rate;
 		err = snd_pcm_hw_params_set_rate_near(pcm, hw, &rate, 0);
-		assert(err >= 0);
+		if (err < 0)
+			return err;
 
 		if (str->mmap_buffer) {
 			snd_pcm_access_mask_t *mask;
@@ -269,8 +270,6 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 		}
 
 		err = snd_pcm_hw_params(pcm, hw);
-		if (err < 0)
-			return err;
 #if 0
 		if (debug)
 			snd_pcm_dump_setup(pcm, stderr);
@@ -365,8 +364,10 @@ static int oss_dsp_close(int fd)
 		oss_dsp_stream_t *str = &dsp->streams[k];
 		if (!str->pcm)
 			continue;
-		if (k == SND_PCM_STREAM_PLAYBACK)
-			snd_pcm_drain(str->pcm);
+		if (k == SND_PCM_STREAM_PLAYBACK) {
+			if (snd_pcm_state(str->pcm) != SND_PCM_STATE_OPEN)
+				snd_pcm_drain(str->pcm);
+		}
 		err = snd_pcm_close(str->pcm);
 		if (err < 0)
 			result = err;
@@ -435,7 +436,9 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 	fds[fd]->class = FD_OSS_DSP;
 	dsp = calloc(1, sizeof(oss_dsp_t));
 	if (!dsp) {
-		errno = -ENOMEM;
+		free(fds[fd]);
+		fds[fd] = NULL;
+		errno = ENOMEM;
 		return -1;
 	}
 	fds[fd]->private = dsp;
@@ -1266,6 +1269,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	}
 	if (err >= 0)
 		return 0;
+	DEBUG("dsp ioctl error = %d\n", err);
 	errno = -err;
 	return -1;
 }
