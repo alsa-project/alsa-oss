@@ -1476,7 +1476,7 @@ int lib_oss_pcm_poll_result(int fd, struct pollfd *ufds)
 			result |= OSS_WAIT_EVENT_ERROR;
 		if (revents & POLLIN)
 			result |= OSS_WAIT_EVENT_READ;
-		if (revents & POLLIN)
+		if (revents & POLLOUT)
 			result |= OSS_WAIT_EVENT_WRITE;
 		ufds += count;
 	}	

@@ -8,9 +8,8 @@
 #include <sys/mman.h>
 #include <sys/soundcard.h>
 #include <sys/time.h>
+#include <sys/poll.h>
 #include <oss-redir.h>
-
-#define VERBOSE 1
 
 //static char data[500000];
 static int verbose;
@@ -24,7 +23,7 @@ static audio_buf_info ospace;
 static audio_buf_info ispace;
 static int bufsize;
 static int fragsize;
-static char *wbuf, *rbuf;
+static char *wbuf = NULL, *rbuf = NULL;
 static int loop = 40;
 
 static void help(void)
@@ -35,15 +34,16 @@ static void help(void)
 "-D,--device    playback device\n"
 "-r,--rate      stream rate in Hz\n"
 "-c,--channels  count of channels in stream\n"
-"-f,--frequency	sine wave frequency in Hz\n"
-"-b,--buffer    ring buffer size in us\n"
-"-p,--period    period size in us\n"
-"-m,--method    transfer method (read/write/duplex)\n"
-"-v,--verbose   show the PCM setup parameters\n"
+//"-f,--frequency	sine wave frequency in Hz\n"
+"-F,--frag      OSS fragment settings (SNDCTL_DSP_SETFRAGMENT)\n"
+"-M,--omode     open mode (read/write/duplex)\n"
+"-m,--method    transfer method (rw, mmap_and_select, mmap_and_poll)\n"
+"-L,--loop      set loop count\n"
+"-v,--verbose   show more info\n"
 "\n");
 }
 
-static void set_params(void)
+static void set_params(int do_mmap)
 {
 	int caps;
 
@@ -64,8 +64,9 @@ static void set_params(void)
 		fprintf(stderr, "Sorry but your sound driver is too old\n");
 		exit(EXIT_FAILURE);
 	}
-	if (!(caps & DSP_CAP_TRIGGER) ||
-	    !(caps & DSP_CAP_MMAP))
+	if (do_mmap &&
+            (!(caps & DSP_CAP_TRIGGER) ||
+	     !(caps & DSP_CAP_MMAP)))
 	{
 		fprintf(stderr, "Sorry but your soundcard can't do this\n");
 		exit(EXIT_FAILURE);
@@ -84,11 +85,13 @@ static void set_params(void)
 		printf("ospace.fragsize = %i\n", ospace.fragsize);
 		printf("ospace.periods = %i\n", ospace.fragments);
 		printf("ospace.bytes = %i\n", ospace.bytes);
-		if ((wbuf=mmap(NULL, bufsize, PROT_WRITE, MAP_FILE|MAP_SHARED, fd, 0))==MAP_FAILED) {
-			perror("mmap (write)");
-			exit(-1);
+		if (do_mmap) {
+			if ((wbuf=mmap(NULL, bufsize, PROT_WRITE, MAP_FILE|MAP_SHARED, fd, 0))==MAP_FAILED) {
+				perror("mmap (write)");
+				exit(-1);
+			}
+			printf("mmap (out) returned %p\n", wbuf);
 		}
-		printf("mmap (out) returned %p\n", wbuf);
 	}
 	if (omode == O_RDWR || omode == O_RDONLY) {
 		if (oss_pcm_ioctl(fd, SNDCTL_DSP_GETISPACE, &ispace) < 0) {
@@ -109,11 +112,13 @@ static void set_params(void)
 			printf("ispace.fragsize = %i\n", ispace.fragsize);
 			printf("ispace.periods = %i\n", ispace.fragments);
 			printf("ispace.bytes = %i\n", ispace.bytes);
-			if ((rbuf=mmap(NULL, bufsize, PROT_READ, MAP_FILE|MAP_SHARED, fd, 0))==MAP_FAILED) {
-				perror("mmap (read)");
-				exit(-1);
+			if (do_mmap) {
+				if ((rbuf=mmap(NULL, bufsize, PROT_READ, MAP_FILE|MAP_SHARED, fd, 0))==MAP_FAILED) {
+					perror("mmap (read)");
+					exit(-1);
+				}
+				printf("mmap (in) returned %p\n", rbuf);
 			}
-			printf("mmap (in) returned %p\n", rbuf);
 		}
 	}
 }
@@ -141,18 +146,166 @@ static void set_trigger(void)
 	printf("Trigger set to %08x\n", tmp);
 }
 
+static void rw_loop(void)
+{
+	int idx, first = 1;
+
+	for (idx=0; idx<loop; idx++) {
+		char buf[1000];
+		if (omode != O_RDONLY) {
+			ssize_t res;
+			if (first) {
+				res = oss_pcm_write(fd, buf, sizeof(buf));
+				if (verbose)
+					printf("write: (%i) -> %i\n", sizeof(buf), (int)res);
+			}
+			res = oss_pcm_write(fd, buf, sizeof(buf));
+			if (verbose)
+				printf("write: (%i) -> %i\n", sizeof(buf), (int)res);
+			first = 0;
+		}
+		if (omode != O_WRONLY) {
+			ssize_t res = oss_pcm_read(fd, buf, sizeof(buf));
+			if (verbose)
+				printf("read: (%i) -> %i\n", sizeof(buf), (int)res);
+		}
+	}
+}
+
+static void rw_and_select_loop(void)
+{
+}
+
+static void rw_and_poll_loop(void)
+{
+}
+
+static void mmap_loop(void)
+{
+}
+
+static void mmap_and_select_loop(void)
+{
+	int nfrag_in = 0, nfrag_out = 0, idx;
+	struct timeval tim;
+	fd_set writeset, readset;
+
+	for (idx=0; idx<loop; idx++) {
+		struct count_info count_in, count_out;
+		int res, maxfd;
+
+		FD_ZERO(&writeset);
+		FD_ZERO(&readset);
+		maxfd = oss_pcm_select_prepare(fd, omode, &readset, &writeset, NULL);
+
+		tim.tv_sec = 10;
+		tim.tv_usec = 0;
+
+		res = select(maxfd + 1, &readset, &writeset, NULL, &tim);
+		if (res < 0)
+			perror("select\n");
+		if (verbose) {
+			printf("Select returned: %03d\n", res);
+			fflush(stdout);
+		}
+		if (omode != O_WRONLY) {
+			if (oss_pcm_ioctl(fd, SNDCTL_DSP_GETIPTR, &count_in) < 0) {
+				perror("GETOPTR");
+				exit(EXIT_FAILURE);
+			}
+			nfrag_in += count_in.blocks;
+			if (verbose) {
+				printf("GETIPTR: Total: %09d, Period: %03d, Ptr: %06d\n", count_in.bytes, nfrag_in, count_in.ptr);
+				fflush(stdout);
+			}
+		}
+		if (omode != O_RDONLY) {
+			if (oss_pcm_ioctl(fd, SNDCTL_DSP_GETOPTR, &count_out) < 0) {
+				perror("GETOPTR");
+				exit(EXIT_FAILURE);
+			}
+			nfrag_out += count_out.blocks;
+			if (verbose) {
+				printf("GETOPTR: Total: %09d, Period: %03d, Ptr: %06d\n", count_out.bytes, nfrag_out, count_out.ptr);
+				fflush(stdout);
+			}
+		}
+	}
+}
+
+static void mmap_and_poll_loop(void)
+{
+	int nfrag_in = 0, nfrag_out = 0, idx;
+	int fd_count;
+	
+	fd_count = oss_pcm_poll_fds(fd);
+
+	for (idx=0; idx<loop; idx++) {
+		struct pollfd ufds[fd_count];
+		struct count_info count_in, count_out;
+		int res;
+
+		oss_pcm_poll_prepare(fd, omode, ufds);
+
+		res = poll(ufds, fd_count, 10000);
+		if (res < 0)
+			perror("poll\n");
+		if (verbose) {
+			printf("Poll returned: %03d\n", res);
+			fflush(stdout);
+		}
+		if (omode != O_WRONLY) {
+			if (oss_pcm_ioctl(fd, SNDCTL_DSP_GETIPTR, &count_in) < 0) {
+				perror("GETOPTR");
+				exit(EXIT_FAILURE);
+			}
+			nfrag_in += count_in.blocks;
+			if (verbose) {
+				printf("GETIPTR: Total: %09d, Period: %03d, Ptr: %06d\n", count_in.bytes, nfrag_in, count_in.ptr);
+				fflush(stdout);
+			}
+		}
+		if (omode != O_RDONLY) {
+			if (oss_pcm_ioctl(fd, SNDCTL_DSP_GETOPTR, &count_out) < 0) {
+				perror("GETOPTR");
+				exit(EXIT_FAILURE);
+			}
+			nfrag_out += count_out.blocks;
+			if (verbose) {
+				printf("GETOPTR: Total: %09d, Period: %03d, Ptr: %06d\n", count_out.bytes, nfrag_out, count_out.ptr);
+				fflush(stdout);
+			}
+		}
+	}
+}
+
+struct transfer_method {
+	const char *name;
+	int do_mmap;
+	void (*transfer_loop)(void);
+};
+
+static struct transfer_method transfer_methods[] = {
+	{ "rw", 0, rw_loop },
+	{ "rw_and_select", 0, rw_and_select_loop },
+	{ "rw_and_poll", 0, rw_and_poll_loop },
+	{ "mmap", 1, mmap_loop },
+	{ "mmap_and_select", 1, mmap_and_select_loop },
+	{ "mmap_and_poll", 1, mmap_and_poll_loop },
+	{ NULL, 0, NULL }
+};
+
 int main(int argc, char *argv[])
 {
 	int morehelp = 0;
-	int nfrag, idx;
-	struct timeval tim;
-	fd_set writeset, readset;
+	int method = 0;
         struct option long_option[] =
         {
 		{"help", 0, NULL, 'h'},
 		{"device", 1, NULL, 'D'},
                 {"verbose", 1, NULL, 'v'},
 		{"omode", 1, NULL, 'M'},
+		{"mode", 1, NULL, 'm'},
 		{"rate", 1, NULL, 'r'},
 		{"channels", 1, NULL, 'c'},
 		{"frag", 1, NULL, 'F'},
@@ -163,7 +316,7 @@ int main(int argc, char *argv[])
         morehelp = 0;
 	while (1) {
 		int c;
-		if ((c = getopt_long(argc, argv, "hD:M:r:c:F:L:v", long_option, NULL)) < 0)
+		if ((c = getopt_long(argc, argv, "hD:M:m:r:c:F:L:v", long_option, NULL)) < 0)
 			break;
 		switch (c) {
 		case 'h':
@@ -179,6 +332,13 @@ int main(int argc, char *argv[])
 				omode = O_WRONLY;
 			else
 				omode = O_RDWR;
+			break;
+		case 'm':
+			for (method = 0; transfer_methods[method].name; method++)
+				if (!strcasecmp(transfer_methods[method].name, optarg))
+					break;
+			if (transfer_methods[method].name == NULL)
+				method = 0;
 			break;
 		case 'r':
 			rate = atoi(optarg);
@@ -203,42 +363,20 @@ int main(int argc, char *argv[])
                 return 0;
         }
 
+	printf("Using transfer method %s\n", transfer_methods[method].name);
+
 	if ((fd=oss_pcm_open(device, O_RDWR, 0))==-1) {
-		perror("/dev/dsp");
+		perror(device);
 		exit(-1);
 	}
 
-	set_params();
-	set_trigger();
+	printf("Device %s opened sucessfully\n", device);
 
+	set_params(transfer_methods[method].do_mmap);
+	if (transfer_methods[method].do_mmap)
+		set_trigger();
 
-	nfrag = 0;
-	for (idx=0; idx<loop; idx++) {
-		struct count_info count;
-		int res, maxfd;
-
-		FD_ZERO(&writeset);
-		FD_ZERO(&readset);
-		maxfd = oss_pcm_select_prepare(fd, omode, &readset, &writeset, NULL);
-
-		tim.tv_sec = 10;
-		tim.tv_usec = 0;
-
-		res = select(maxfd + 1, &readset, &writeset, NULL, &tim);
-#ifdef VERBOSE
-		printf("Select returned: %03d\n", res);
-		fflush(stdout);
-#endif		
-		if (oss_pcm_ioctl(fd, SNDCTL_DSP_GETOPTR, &count) < 0) {
-			perror("GETOPTR");
-			exit(EXIT_FAILURE);
-		}
-		nfrag += count.blocks;
-#ifdef VERBOSE
-		printf("Total: %09d, Period: %03d, Ptr: %06d\n", count.bytes, nfrag, count.ptr);
-		fflush(stdout);
-#endif
-	}
+	transfer_methods[method].transfer_loop();
 
 	close(fd);
 

@@ -385,7 +385,7 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 		{
 			unsigned short events = pfds[k].events;
 			int fmode = 0;
-			if (events & (POLLIN|POLLOUT))
+			if ((events & (POLLIN|POLLOUT)) == (POLLIN|POLLOUT))
 				fmode = O_RDWR;
 			else if (events & POLLIN)
 				fmode = O_RDONLY;
@@ -436,6 +436,7 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 					   ((result & OSS_WAIT_EVENT_READ) ? POLLIN : 0) |
 					   ((result & OSS_WAIT_EVENT_WRITE) ? POLLOUT : 0);
 			}
+			nfds1 += lib_oss_pcm_poll_fds(fd);
 			break;
 		}
 		default:
