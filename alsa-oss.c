@@ -176,14 +176,13 @@ static int alsa_format_to_oss(int format)
 	}
 }
 
-static int oss_dsp_params(oss_dsp_t *dsp)
+static int oss_dsp_hw_params(oss_dsp_t *dsp)
 {
 	int k;
 	for (k = 1; k >= 0; --k) {
 		oss_dsp_stream_t *str = &dsp->streams[k];
 		snd_pcm_t *pcm = str->pcm;
 		snd_pcm_hw_params_t hw;
-		snd_pcm_sw_params_t sw;
 		int format;
 		int err;
 		if (!pcm)
@@ -246,6 +245,20 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 		str->period_size = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_PERIOD_SIZE, 0);
 		str->periods = snd_pcm_hw_param_value(&hw, SND_PCM_HW_PARAM_PERIODS, 0);
 		str->buffer_size = str->periods * str->period_size;
+	}
+	return 0;
+}
+
+static int oss_dsp_sw_params(oss_dsp_t *dsp)
+{
+	int k;
+	for (k = 1; k >= 0; --k) {
+		oss_dsp_stream_t *str = &dsp->streams[k];
+		snd_pcm_t *pcm = str->pcm;
+		snd_pcm_sw_params_t sw;
+		int err;
+		if (!pcm)
+			continue;
 		snd_pcm_sw_params_current(pcm, &sw);
 		if (str->disabled)
 			snd_pcm_sw_param_set(pcm, &sw, 
@@ -271,10 +284,19 @@ static int oss_dsp_params(oss_dsp_t *dsp)
 		if (err < 0)
 			return err;
 		str->boundary = sw.boundary;
-		err = snd_pcm_prepare(pcm);
-		if (err < 0)
-			return err;
 	}
+	return 0;
+}
+
+static int oss_dsp_params(oss_dsp_t *dsp)
+{
+	int err;
+	err = oss_dsp_hw_params(dsp);
+	if (err < 0) 
+		return err;
+	err = oss_dsp_sw_params(dsp);
+	if (err < 0) 
+		return err;
 	return 0;
 }
 
@@ -689,13 +711,12 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		if (pcm) {
 			if (result & PCM_ENABLE_INPUT) {
 				str->disabled = 0;
-				if (oss_dsp_params(dsp) >= 0 &&
-				    snd_pcm_prepare(pcm) >= 0)
+				if (oss_dsp_sw_params(dsp) >= 0)
 					snd_pcm_start(pcm);
 			} else {
 				str->disabled = 1;
 				if (snd_pcm_drop(pcm) >= 0)
-					oss_dsp_params(dsp);				
+					oss_dsp_sw_params(dsp);				
 			}
 		}
 		str = &dsp->streams[SND_PCM_STREAM_PLAYBACK];
@@ -703,13 +724,12 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		if (pcm) {
 			if (result & PCM_ENABLE_OUTPUT) {
 				str->disabled = 0;
-				if (oss_dsp_params(dsp) >= 0 &&
-				    snd_pcm_prepare(pcm) >= 0)
+				if (oss_dsp_sw_params(dsp) >= 0)
 					snd_pcm_start(pcm);
 			} else {
 				str->disabled = 1;
 				if (snd_pcm_drop(pcm) >= 0)
-					oss_dsp_params(dsp);				
+					oss_dsp_sw_params(dsp);				
 			}
 		}
 		return 0;
