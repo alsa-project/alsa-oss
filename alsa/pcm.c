@@ -429,6 +429,11 @@ int lib_oss_pcm_close(int fd)
 	}
 	dsp = xfd->dsp;
 	for (k = 0; k < 2; ++k) {
+		oss_dsp_stream_t *str = &dsp->streams[k];
+		if (str->sw_params)
+			snd_pcm_sw_params_free(str->sw_params);
+	}
+	for (k = 0; k < 2; ++k) {
 		int err;
 		oss_dsp_stream_t *str = &dsp->streams[k];
 		if (!str->pcm)
@@ -537,6 +542,10 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 		result = snd_pcm_sw_params_malloc(&dsp->streams[k].sw_params);
 		if (result < 0)
 			goto _error;
+	}
+	for (k = 0; k < 2; ++k) {
+		if (!(streams & (1 << k)))
+			continue;
 		result = snd_pcm_open(&dsp->streams[k].pcm, name, k, pcm_mode);
 		if (result < 0) {
 			if (k == 1 && dsp->streams[0].pcm != NULL) {
