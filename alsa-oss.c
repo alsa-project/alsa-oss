@@ -36,6 +36,8 @@
 #include <linux/soundcard.h>
 #include <sys/asoundlib.h>
 
+#define _GNU_SOURCE
+
 static int debug = 0;
 
 #if __GNUC__ > 2 || (__GNUC__ == 2 && __GNUC_MINOR__ >= 95)
