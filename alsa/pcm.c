@@ -1149,8 +1149,8 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 			diff += str->alsa.boundary;
 		str->oss.hw_bytes += diff;
 		str->oss.hw_bytes %= str->oss.boundary;
-		info->bytes = str->oss.hw_bytes * str->frame_bytes;
-		info->ptr = info->bytes % (str->oss.buffer_size * str->frame_bytes);
+		info->bytes = (str->oss.hw_bytes * str->frame_bytes) & 0x7fffffff;
+		info->ptr = (str->oss.hw_bytes % str->oss.buffer_size) * str->frame_bytes;
 		if (str->mmap_buffer) {
 			ssize_t n = (hw_ptr / str->oss.period_size) - (str->alsa.old_hw_ptr / str->oss.period_size);
 			if (n < 0)
@@ -1192,8 +1192,8 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 			diff += str->alsa.boundary;
 		str->oss.hw_bytes += diff;
 		str->oss.hw_bytes %= str->oss.boundary;
-		info->bytes = str->oss.hw_bytes * str->frame_bytes;
-		info->ptr = info->bytes % (str->oss.buffer_size * str->frame_bytes);
+		info->bytes = (str->oss.hw_bytes * str->frame_bytes) & 0x7fffffff;
+		info->ptr = (str->oss.hw_bytes % str->oss.buffer_size) * str->frame_bytes;
 		if (str->mmap_buffer) {
 			ssize_t n = (hw_ptr / str->oss.period_size) - (str->alsa.old_hw_ptr / str->oss.period_size);
 			if (n < 0)
