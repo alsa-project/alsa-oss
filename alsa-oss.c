@@ -319,6 +319,11 @@ static int oss_dsp_close(int fd)
 		errno = -result;
 		return -1;
 	}
+	DEBUG("close(%d) -> %d", fd, result);
+	if (result < 0)
+		DEBUG("(errno=%d)\n", errno);
+	else
+		DEBUG("\n");
 	return 0;
 }
 
