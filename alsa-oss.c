@@ -100,18 +100,23 @@ typedef struct {
 	size_t bytes;
 	snd_pcm_uframes_t boundary;
 	snd_pcm_uframes_t old_hw_ptr;
-	unsigned int mmap:1,
-		     disabled:1;
+	unsigned int stopped:1;
+	void *mmap_buffer;
 	size_t mmap_bytes;
+	size_t mmap_buffer_bytes;
+	size_t mmap_period_bytes;
+	snd_pcm_channel_area_t *mmap_areas;
+	snd_pcm_uframes_t mmap_advance;
 } oss_dsp_stream_t;
 
 typedef struct {
-	int channels;
-	int rate;
-	int format;
-	int fragshift;
-	int maxfrags;
-	int subdivision;
+	unsigned int channels;
+	unsigned int rate;
+	unsigned int oss_format;
+	snd_pcm_format_t format;
+	unsigned int fragshift;
+	unsigned int maxfrags;
+	unsigned int subdivision;
 	oss_dsp_stream_t streams[2];
 } oss_dsp_t;
 
@@ -123,9 +128,9 @@ typedef struct {
 } oss_mixer_t;
 
 typedef enum {
-  FD_OSS_DSP,
-  FD_OSS_MIXER,
-  FD_CLASSES,
+	FD_OSS_DSP,
+	FD_OSS_MIXER,
+	FD_CLASSES,
 } fd_class_t;
 
 static ops_t ops[FD_CLASSES];
@@ -198,26 +203,16 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 		oss_dsp_stream_t *str = &dsp->streams[k];
 		snd_pcm_t *pcm = str->pcm;
 		snd_pcm_hw_params_t *hw;
-		snd_pcm_format_t format;
 		int err;
 		unsigned int periods_min;
 		if (!pcm)
 			continue;
+		str->frame_bytes = snd_pcm_format_physical_width(dsp->format) * dsp->channels / 8;
 		snd_pcm_hw_params_alloca(&hw);
 		snd_pcm_hw_params_any(pcm, hw);
-		if (str->mmap) {
-			snd_pcm_uframes_t max = str->mmap_bytes / str->frame_bytes;
-			err = snd_pcm_hw_params_set_buffer_size_max(pcm, hw, &max);
-			if (err < 0)
-				return err;
-			err = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_MMAP_INTERLEAVED);
-		} else
-			err = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED);
-		if (err < 0)
-			return err;
-		format = oss_format_to_alsa(dsp->format);
+		dsp->format = oss_format_to_alsa(dsp->oss_format);
 
-		err = snd_pcm_hw_params_set_format(pcm, hw, format);
+		err = snd_pcm_hw_params_set_format(pcm, hw, dsp->format);
 		if (err < 0)
 			return err;
 		err = snd_pcm_hw_params_set_channels(pcm, hw, dsp->channels);
@@ -227,24 +222,53 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 		err = snd_pcm_hw_params_set_periods_integer(pcm, hw);
 		if (err < 0)
 			return err;
-		periods_min = 2;
-		err = snd_pcm_hw_params_set_periods_min(pcm, hw, &periods_min, 0);
-		if (err < 0)
-			return err;
-		if (dsp->maxfrags > 0) {
-			unsigned int periods_max = dsp->maxfrags;
-			err = snd_pcm_hw_params_set_periods_max(pcm, hw,
-								&periods_max, 0);
-			if (err < 0)
-				return err;
-		}
 		err = snd_pcm_hw_params_set_rate_near(pcm, hw, dsp->rate, 0);
 		assert(err >= 0);
-		if (dsp->fragshift > 0)
-			err = snd_pcm_hw_params_set_period_size_near(pcm, hw, (1 << dsp->fragshift) / str->frame_bytes, 0);
-		else
-			err = snd_pcm_hw_params_set_period_time_near(pcm, hw, 250000, 0);
-		assert(err >= 0);
+
+		if (str->mmap_buffer) {
+			snd_pcm_access_mask_t *mask;
+			snd_pcm_access_mask_alloca(&mask);
+			snd_pcm_access_mask_any(mask);
+			snd_pcm_access_mask_set(mask, SND_PCM_ACCESS_MMAP_INTERLEAVED);
+			snd_pcm_access_mask_set(mask, SND_PCM_ACCESS_MMAP_NONINTERLEAVED);
+			snd_pcm_access_mask_set(mask, SND_PCM_ACCESS_MMAP_COMPLEX);
+			err = snd_pcm_hw_params_set_access_mask(pcm, hw, mask);
+			if (err < 0)
+				return err;
+			err = snd_pcm_hw_params_set_period_size(pcm, hw, str->mmap_period_bytes / str->frame_bytes, 0);
+			if (err < 0)
+				return err;
+			err = snd_pcm_hw_params_set_buffer_size(pcm, hw, str->mmap_buffer_bytes / str->frame_bytes);
+			if (err < 0)
+				return err;
+			err = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_MMAP_INTERLEAVED);
+			if (err < 0)
+				return err;
+		} else {
+			err = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED);
+			if (err < 0)
+				return err;
+			periods_min = 2;
+			err = snd_pcm_hw_params_set_periods_min(pcm, hw, &periods_min, 0);
+			if (err < 0)
+				return err;
+			if (dsp->maxfrags > 0) {
+				unsigned int periods_max = dsp->maxfrags;
+				err = snd_pcm_hw_params_set_periods_max(pcm, hw,
+									&periods_max, 0);
+				if (err < 0)
+					return err;
+			}
+			if (dsp->fragshift > 0)
+				err = snd_pcm_hw_params_set_period_size_near(pcm, hw, (1 << dsp->fragshift) / str->frame_bytes, 0);
+			else {
+				snd_pcm_uframes_t s = 16;
+				while (s * 2 < dsp->rate / 4) 
+					s *= 2;
+				err = snd_pcm_hw_params_set_period_size_near(pcm, hw, s, 0);
+			}
+			assert(err >= 0);
+		}
 
 		err = snd_pcm_hw_params(pcm, hw);
 		if (err < 0)
@@ -254,11 +278,28 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 			snd_pcm_dump_setup(pcm, stderr);
 #endif
 		dsp->rate = snd_pcm_hw_params_get_rate(hw, 0);
-		dsp->format = alsa_format_to_oss(format);
-		str->frame_bytes = snd_pcm_format_physical_width(format) * dsp->channels / 8;
+		dsp->oss_format = alsa_format_to_oss(dsp->format);
 		str->period_size = snd_pcm_hw_params_get_period_size(hw, 0);
 		str->periods = snd_pcm_hw_params_get_periods(hw, 0);
 		str->buffer_size = str->periods * str->period_size;
+		free(str->mmap_areas);
+		str->mmap_areas = 0;
+		if (str->mmap_buffer) {
+			unsigned int c;
+			snd_pcm_channel_area_t *a;
+			unsigned int bits_per_sample, bits_per_frame;
+			str->mmap_areas = calloc(dsp->channels, sizeof(*str->mmap_areas));
+			if (!str->mmap_areas)
+				return -ENOMEM;
+			bits_per_sample = snd_pcm_format_physical_width(dsp->format);
+			bits_per_frame = bits_per_sample * dsp->channels;
+			a = str->mmap_areas;
+			for (c = 0; c < dsp->channels; c++, a++) {
+				a->addr = str->mmap_buffer;
+				a->first = bits_per_sample * c;
+				a->step = bits_per_frame;
+			}
+		}
 	}
 	return 0;
 }
@@ -277,11 +318,11 @@ static int oss_dsp_sw_params(oss_dsp_t *dsp)
 		snd_pcm_sw_params_current(pcm, sw);
 		snd_pcm_sw_params_set_xfer_align(pcm, sw, 1);
 		snd_pcm_sw_params_set_start_mode(pcm, sw, 
-						 str->disabled ? SND_PCM_START_EXPLICIT :
+						 str->stopped ? SND_PCM_START_EXPLICIT :
 						 SND_PCM_START_DATA);
 #if 1
 		snd_pcm_sw_params_set_xrun_mode(pcm, sw,
-				     str->mmap ? SND_PCM_XRUN_NONE :
+				     str->mmap_buffer ? SND_PCM_XRUN_NONE :
 				     SND_PCM_XRUN_STOP);
 #else
 		snd_pcm_sw_params_set_xrun_mode(pcm, sw,
@@ -395,7 +436,7 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode)
 	fds[fd]->private = dsp;
 	dsp->channels = 1;
 	dsp->rate = 8000;
-	dsp->format = format;
+	dsp->oss_format = format;
 	for (k = 0; k < 2; ++k) {
 		if (!(streams & (1 << k)))
 			continue;
@@ -475,7 +516,7 @@ static int oss_mixer_close(int fd)
 	return 0;
 }
 
-int mixer_elem_callback(snd_mixer_elem_t *elem, unsigned int mask)
+static int oss_mixer_elem_callback(snd_mixer_elem_t *elem, unsigned int mask)
 {
 	oss_mixer_t *mixer = snd_mixer_elem_get_callback_private(elem);
 	if (mask == SND_CTL_EVENT_MASK_REMOVE) {
@@ -491,8 +532,8 @@ int mixer_elem_callback(snd_mixer_elem_t *elem, unsigned int mask)
 	return 0;
 }
 
-int mixer_callback(snd_mixer_t *mixer, unsigned int mask, 
-		   snd_mixer_elem_t *elem)
+static int oss_mixer_callback(snd_mixer_t *mixer, unsigned int mask, 
+			      snd_mixer_elem_t *elem)
 {
 	if (mask & SND_CTL_EVENT_MASK_ADD) {
 		oss_mixer_t *mix = snd_mixer_get_callback_private(mixer);
@@ -502,8 +543,8 @@ int mixer_callback(snd_mixer_t *mixer, unsigned int mask,
 			mix->elems[idx] = elem;
 			snd_mixer_selem_set_playback_volume_range(elem, 0, 100);
 			snd_mixer_selem_set_capture_volume_range(elem, 0, 100);
-			snd_mixer_elem_set_callback(elem, mixer_elem_callback);
-			snd_mixer_elem_set_callback_private(elem, snd_mixer_get_callback_private(mixer));
+			snd_mixer_elem_set_callback(elem, oss_mixer_elem_callback);
+			snd_mixer_elem_set_callback_private(elem, mix);
 		}
 	}
 	return 0;
@@ -554,7 +595,7 @@ static int oss_mixer_open(int card, int device, int oflag, mode_t mode ATTRIBUTE
 	result = snd_mixer_selem_register(mixer->mix, NULL, NULL);
 	if (result < 0)
 		goto _error1;
-	snd_mixer_set_callback(mixer->mix, mixer_callback);
+	snd_mixer_set_callback(mixer->mix, oss_mixer_callback);
 	snd_mixer_set_callback_private(mixer->mix, mixer);
 	result = snd_mixer_load(mixer->mix);
 	if (result < 0)
@@ -674,6 +715,56 @@ static ssize_t oss_dsp_read(int fd, void *buf, size_t n)
 	return result;
 }
 
+#define USE_REWIND 1
+
+static void oss_dsp_mmap_update(oss_dsp_t *dsp, snd_pcm_stream_t stream,
+				snd_pcm_sframes_t delay)
+{
+	oss_dsp_stream_t *str = &dsp->streams[stream];
+	snd_pcm_t *pcm = str->pcm;
+	snd_pcm_sframes_t err;
+	snd_pcm_uframes_t size;
+	const snd_pcm_channel_area_t *areas = snd_pcm_mmap_areas(pcm);
+	switch (stream) {
+	case SND_PCM_STREAM_PLAYBACK:
+		if (delay < 0) {
+			snd_pcm_reset(pcm);
+			str->mmap_advance -= delay;
+			if (str->mmap_advance > dsp->rate / 10)
+				str->mmap_advance = dsp->rate / 10;
+//			fprintf(stderr, "mmap_advance=%ld\n", str->mmap_advance);
+		}
+#if USE_REWIND
+		err = snd_pcm_rewind(pcm, str->buffer_size);
+		if (err < 0)
+			return;
+		size = str->mmap_advance;
+//		fprintf(stderr, "delay=%ld rewind=%ld forward=%ld offset=%ld\n",
+//			delay, err, size, snd_pcm_mmap_offset(pcm));
+#else
+		size = str->mmap_advance - delay;
+#endif
+		while (size > 0) {
+			snd_pcm_uframes_t ofs = snd_pcm_mmap_offset(pcm);
+			snd_pcm_uframes_t frames = size;
+			snd_pcm_uframes_t cont = str->buffer_size - ofs;
+			if (frames > cont)
+				frames = cont;
+//			fprintf(stderr, "copy %ld %ld %d\n", ofs, frames, dsp->format);
+			snd_pcm_areas_copy(areas, ofs, str->mmap_areas, ofs, 
+					   dsp->channels, frames,
+					   dsp->format);
+			err = snd_pcm_mmap_forward(pcm, frames);
+			assert(err == (snd_pcm_sframes_t) frames);
+			size -= frames;
+		}
+		break;
+	case SND_PCM_STREAM_CAPTURE:
+		break;
+	}
+}
+
+
 static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 {
 	int result, err = 0;
@@ -757,13 +848,13 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		break;
 	case SNDCTL_DSP_SETFMT:
 		if (*(int *)arg != AFMT_QUERY) {
-			dsp->format = *(int *)arg;
+			dsp->oss_format = *(int *)arg;
 			err = oss_dsp_params(dsp);
 			if (err < 0)
 				break;
 		}
-		DEBUG("SNDCTL_DSP_SETFMT, %p[%d]) -> [%d]\n", arg, *(int *)arg, dsp->format);
-		*(int *) arg = dsp->format;
+		DEBUG("SNDCTL_DSP_SETFMT, %p[%d]) -> [%d]\n", arg, *(int *)arg, dsp->oss_format);
+		*(int *) arg = dsp->oss_format;
 		break;
 	case SNDCTL_DSP_GETBLKSIZE:
 		str = &dsp->streams[snd_enum_to_int(SND_PCM_STREAM_PLAYBACK)];
@@ -854,8 +945,8 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		pcm = str->pcm;
 		if (pcm) {
 			if (result & PCM_ENABLE_INPUT) {
-				if (str->disabled) {
-					str->disabled = 0;
+				if (str->stopped) {
+					str->stopped = 0;
 					err = oss_dsp_sw_params(dsp);
 					if (err < 0)
 						break;
@@ -864,8 +955,8 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 						break;
 				}
 			} else {
-				if (!str->disabled) {
-					str->disabled = 1;
+				if (!str->stopped) {
+					str->stopped = 1;
 					err = snd_pcm_drop(pcm);
 					if (err < 0)
 						break;
@@ -882,18 +973,26 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 		pcm = str->pcm;
 		if (pcm) {
 			if (result & PCM_ENABLE_OUTPUT) {
-				if (str->disabled) {
-					str->disabled = 0;
+				if (str->stopped) {
+					str->stopped = 0;
 					err = oss_dsp_sw_params(dsp);
 					if (err < 0)
 						break;
+					if (str->mmap_buffer) {
+						const snd_pcm_channel_area_t *areas;
+						areas = snd_pcm_mmap_areas(pcm);
+						snd_pcm_areas_copy(areas, 0, str->mmap_areas, 0,
+								   dsp->channels, str->buffer_size,
+								   dsp->format);
+						snd_pcm_mmap_forward(pcm, str->buffer_size);
+					}
 					err = snd_pcm_start(pcm);
 					if (err < 0)
 						break;
 				}
 			} else {
-				if (!str->disabled) {
-					str->disabled = 1;
+				if (!str->stopped) {
+					str->stopped = 1;
 					err = snd_pcm_drop(pcm);
 					if (err < 0)
 						break;
@@ -911,6 +1010,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	case SNDCTL_DSP_GETISPACE:
 	{
 		snd_pcm_sframes_t avail, delay;
+		snd_pcm_state_t state;
 		audio_buf_info *info = arg;
 		str = &dsp->streams[snd_enum_to_int(SND_PCM_STREAM_CAPTURE)];
 		pcm = str->pcm;
@@ -918,8 +1018,11 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 			err = -EINVAL;
 			break;
 		}
-		if (snd_pcm_state(pcm) == SND_PCM_STATE_RUNNING) {
+		state = snd_pcm_state(pcm);
+		if (state == SND_PCM_STATE_RUNNING) {
 			snd_pcm_delay(pcm, &delay);
+			if (str->mmap_buffer)
+				oss_dsp_mmap_update(dsp, SND_PCM_STREAM_CAPTURE, delay);
 		}
 		avail = snd_pcm_avail_update(pcm);
 		if (avail < 0)
@@ -938,6 +1041,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	case SNDCTL_DSP_GETOSPACE:
 	{
 		snd_pcm_sframes_t avail, delay;
+		snd_pcm_state_t state;
 		audio_buf_info *info = arg;
 		str = &dsp->streams[snd_enum_to_int(SND_PCM_STREAM_PLAYBACK)];
 		pcm = str->pcm;
@@ -945,8 +1049,12 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 			err = -EINVAL;
 			break;
 		}
-		if (snd_pcm_state(pcm) == SND_PCM_STATE_RUNNING) {
+		state = snd_pcm_state(pcm);
+		if (state == SND_PCM_STATE_RUNNING || 
+		    state == SND_PCM_STATE_DRAINING) {
 			snd_pcm_delay(pcm, &delay);
+			if (str->mmap_buffer)
+				oss_dsp_mmap_update(dsp, SND_PCM_STREAM_PLAYBACK, delay);
 		}
 		avail = snd_pcm_avail_update(pcm);
 		if (avail < 0)
@@ -964,8 +1072,9 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	}
 	case SNDCTL_DSP_GETIPTR:
 	{
-		snd_pcm_sframes_t delay;
+		snd_pcm_sframes_t delay = 0;
 		snd_pcm_uframes_t hw_ptr;
+		snd_pcm_state_t state;
 		count_info *info = arg;
 		str = &dsp->streams[snd_enum_to_int(SND_PCM_STREAM_CAPTURE)];
 		pcm = str->pcm;
@@ -973,19 +1082,19 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 			err = -EINVAL;
 			break;
 		}
-		if (snd_pcm_state(pcm) == SND_PCM_STATE_RUNNING) {
-			err = snd_pcm_delay(pcm, &delay);
-			if (err < 0)
-				break;
-		} else
-			delay = 0;
+		state = snd_pcm_state(pcm);
+		if (state == SND_PCM_STATE_RUNNING) {
+			snd_pcm_delay(pcm, &delay);
+			if (str->mmap_buffer)
+				oss_dsp_mmap_update(dsp, SND_PCM_STREAM_CAPTURE, delay);
+		}
 		/* FIXME */
 		hw_ptr = _snd_pcm_mmap_hw_ptr(pcm);
 		info->bytes = hw_ptr;
 		info->bytes *= str->frame_bytes;
 		info->ptr = hw_ptr % str->buffer_size;
 		info->ptr *= str->frame_bytes;
-		if (str->mmap) {
+		if (str->mmap_buffer) {
 			ssize_t n = (hw_ptr / str->period_size) - (str->old_hw_ptr / str->period_size);
 			if (n < 0)
 				n += str->boundary / str->period_size;
@@ -1001,8 +1110,9 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	}
 	case SNDCTL_DSP_GETOPTR:
 	{
-		snd_pcm_sframes_t delay;
+		snd_pcm_sframes_t delay = 0;
 		snd_pcm_uframes_t hw_ptr;
+		snd_pcm_state_t state;
 		count_info *info = arg;
 		str = &dsp->streams[snd_enum_to_int(SND_PCM_STREAM_PLAYBACK)];
 		pcm = str->pcm;
@@ -1010,19 +1120,20 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 			err = -EINVAL;
 			break;
 		}
-		err = snd_pcm_delay(pcm, &delay);
-		if (snd_pcm_state(pcm) == SND_PCM_STATE_RUNNING) {
-			if (err < 0)
-				break;
-		} else
-			delay = 0;
+		state = snd_pcm_state(pcm);
+		if (state == SND_PCM_STATE_RUNNING || 
+		    state == SND_PCM_STATE_DRAINING) {
+			snd_pcm_delay(pcm, &delay);
+			if (str->mmap_buffer)
+				oss_dsp_mmap_update(dsp, SND_PCM_STREAM_PLAYBACK, delay);
+		}
 		/* FIXME */
 		hw_ptr = _snd_pcm_mmap_hw_ptr(pcm);
 		info->bytes = hw_ptr;
 		info->bytes *= str->frame_bytes;
 		info->ptr = hw_ptr % str->buffer_size;
 		info->ptr *= str->frame_bytes;
-		if (str->mmap) {
+		if (str->mmap_buffer) {
 			ssize_t n = (hw_ptr / str->period_size) - (str->old_hw_ptr / str->period_size);
 			if (n < 0)
 				n += str->boundary / str->period_size;
@@ -1038,16 +1149,21 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	}
 	case SNDCTL_DSP_GETODELAY:
 	{
-		snd_pcm_sframes_t delay;
+		snd_pcm_sframes_t delay = 0;
+		snd_pcm_state_t state;
 		str = &dsp->streams[snd_enum_to_int(SND_PCM_STREAM_PLAYBACK)];
 		pcm = str->pcm;
 		if (!pcm) {
 			err = -EINVAL;
 			break;
 		}
-		if (snd_pcm_state(pcm) != SND_PCM_STATE_RUNNING ||
-		    snd_pcm_delay(pcm, &delay) < 0)
-			delay = 0;
+		state = snd_pcm_state(pcm);
+		if (state == SND_PCM_STATE_RUNNING || 
+		    state == SND_PCM_STATE_DRAINING) {
+			snd_pcm_delay(pcm, &delay);
+			if (str->mmap_buffer)
+				oss_dsp_mmap_update(dsp, SND_PCM_STREAM_PLAYBACK, delay);
+		}
 		*(int *)arg = delay * str->frame_bytes;
 		DEBUG("SNDCTL_DSP_GETODELAY, %p) -> [%d]\n", arg, *(int*)arg); 
 		break;
@@ -1069,7 +1185,7 @@ static int oss_dsp_ioctl(int fd, unsigned long cmd, ...)
 	}
 	case SOUND_PCM_READ_BITS:
 	{
-		*(int *)arg = snd_pcm_format_width(oss_format_to_alsa(dsp->format));
+		*(int *)arg = snd_pcm_format_width(dsp->format);
 		DEBUG("SOUND_PCM_READ_BITS, %p) -> [%d]\n", arg, *(int*)arg); 
 		break;
 	}
@@ -1180,15 +1296,23 @@ static void *oss_dsp_mmap(void *addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUS
 		result = MAP_FAILED;
 		goto _end;
 	}
-	str->mmap = 1;
+	assert(!str->mmap_buffer);
+	result = malloc(len);
+	if (!result) {
+		result = MAP_FAILED;
+		goto _end;
+	}
+	str->mmap_buffer = result;
 	str->mmap_bytes = len;
+	str->mmap_period_bytes = str->period_size * str->frame_bytes;
+	str->mmap_buffer_bytes = str->buffer_size * str->frame_bytes;
 	err = oss_dsp_params(dsp);
 	if (err < 0) {
+		free(result);
 		errno = -err;
 		result = MAP_FAILED;
 		goto _end;
 	}
-	result = snd_pcm_mmap_areas(str->pcm)->addr;
  _end:
 	DEBUG("mmap(%p, %lu, %d, %d, %d, %ld) -> %p\n", addr, (unsigned long)len, prot, flags, fd, offset, result);
 	return result;
@@ -1203,7 +1327,9 @@ static int oss_dsp_munmap(int fd, void *addr ATTRIBUTE_UNUSED, size_t len ATTRIB
 	str = &dsp->streams[snd_enum_to_int(SND_PCM_STREAM_PLAYBACK)];
 	if (!str->pcm)
 		str = &dsp->streams[snd_enum_to_int(SND_PCM_STREAM_CAPTURE)];
-	str->mmap = 0;
+	assert(str->mmap_buffer);
+	free(str->mmap_buffer);
+	str->mmap_buffer = 0;
 	str->mmap_bytes = 0;
 	err = oss_dsp_params(dsp);
 	if (err < 0) {
