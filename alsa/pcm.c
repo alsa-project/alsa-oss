@@ -1418,7 +1418,7 @@ int lib_oss_pcm_select_prepare(int fd, int fmode, fd_set *readfds, fd_set *write
 		if ((fmode & O_ACCMODE) == O_WRONLY && snd_pcm_stream(pcm) == SND_PCM_STREAM_CAPTURE)
 			continue;
 		if (str->mmap_buffer)
-			set_oss_mmap_avail_min(&dsp->streams[k], k, pcm);
+			set_oss_mmap_avail_min(str, k, pcm);
 		count = snd_pcm_poll_descriptors_count(pcm);
 		if (count < 0) {
 			errno = -count;
@@ -1557,7 +1557,7 @@ int lib_oss_pcm_poll_prepare(int fd, int fmode, struct pollfd *ufds)
 		if ((fmode & O_ACCMODE) == O_WRONLY && snd_pcm_stream(pcm) == SND_PCM_STREAM_CAPTURE)
 			continue;
 		if (str->mmap_buffer)
-			set_oss_mmap_avail_min(&dsp->streams[k], k, pcm);
+			set_oss_mmap_avail_min(str, k, pcm);
 		count = snd_pcm_poll_descriptors_count(pcm);
 		if (count < 0) {
 			errno = -count;
