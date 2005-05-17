@@ -588,14 +588,16 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode ATTRIBUTE_U
 		if (card == 0 && (device == OSS_DEVICE_DSP || device == OSS_DEVICE_AUDIO))
 			strcpy(name, "default");
 		else
-			sprintf(name, "plughw:%d", card);
+			sprintf(name, "default:%d", card);
 		result = open_pcm(dsp, name, pcm_mode, streams);
 		if (result < 0)
 			goto _error;
 	}
 	result = oss_dsp_params(dsp);
-	if (result < 0)
+	if (result < 0) {
+		DEBUG("Error setting params\n");
 		goto _error;
+	}
 	xfd->fileno = fd;
 	insert_fd(xfd);
 	return fd;
