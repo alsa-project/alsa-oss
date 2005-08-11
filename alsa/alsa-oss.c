@@ -66,18 +66,18 @@
 #define O_LARGEFILE 0100000
 #endif
 
-int (*_select)(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
-int (*_poll)(struct pollfd *ufds, unsigned int nfds, int timeout);
-int (*_open)(const char *file, int oflag, ...);
-int (*_close)(int fd);
-ssize_t (*_write)(int fd, const void *buf, size_t n);
-ssize_t (*_read)(int fd, void *buf, size_t n);
-int (*_ioctl)(int fd, unsigned long request, ...);
-int (*_fcntl)(int fd, int cmd, ...);
-void *(*_mmap)(void *addr, size_t len, int prot, int flags, int fd, off_t offset);
-int (*_munmap)(void* addr, size_t len);
+static int (*_select)(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
+static int (*_poll)(struct pollfd *ufds, unsigned int nfds, int timeout);
+static int (*_open)(const char *file, int oflag, ...);
+static int (*_close)(int fd);
+static ssize_t (*_write)(int fd, const void *buf, size_t n);
+static ssize_t (*_read)(int fd, void *buf, size_t n);
+static int (*_ioctl)(int fd, unsigned long request, ...);
+static int (*_fcntl)(int fd, int cmd, ...);
+static void *(*_mmap)(void *addr, size_t len, int prot, int flags, int fd, off_t offset);
+static int (*_munmap)(void* addr, size_t len);
 
-FILE *(*_fopen)(const char *path, const char *mode);
+static FILE *(*_fopen)(const char *path, const char *mode);
 
 typedef struct ops {
 	int (*close)(int fd);
@@ -345,6 +345,9 @@ int fcntl(int fd, int cmd, ...)
 {
 	va_list args;
 	void *arg;
+
+	if (!initialized)
+		initialize();
 
 	va_start(args, cmd);
 	arg = va_arg(args, void *);
