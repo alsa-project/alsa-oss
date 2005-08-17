@@ -101,6 +101,7 @@ typedef struct {
 	fd_class_t class;
 	int oflags;
 	void *mmap_area;
+	int poll_fds;
 } fd_t;
 
 static void initialize(void);
@@ -110,6 +111,11 @@ static int oss_wrapper_debug = 0;
 static int open_max;
 static int poll_fds_add = 0;
 static fd_t **fds;
+
+static inline int is_oss_device(int fd)
+{
+	return fd >= 0 && fd < open_max && fds[fd];
+}
 
 static int is_dsp_device(const char *pathname)
 {
@@ -217,22 +223,22 @@ static int bad_munmap(void* addr ATTRIBUTE_UNUSED, size_t len ATTRIBUTE_UNUSED)
 
 static ops_t ops[FD_CLASSES] = {
         [FD_OSS_DSP] = {
-		close: lib_oss_pcm_close,
-		write: lib_oss_pcm_write,
-		read: lib_oss_pcm_read,
-		ioctl: lib_oss_pcm_ioctl,
-		fcntl: oss_pcm_fcntl,
-		mmap: lib_oss_pcm_mmap,
-		munmap: lib_oss_pcm_munmap,
+		.close = lib_oss_pcm_close,
+		.write = lib_oss_pcm_write,
+		.read = lib_oss_pcm_read,
+		.ioctl = lib_oss_pcm_ioctl,
+		.fcntl = oss_pcm_fcntl,
+		.mmap = lib_oss_pcm_mmap,
+		.munmap = lib_oss_pcm_munmap,
         },
         [FD_OSS_MIXER] = {
-		close: lib_oss_mixer_close,
-		write: bad_write,
-		read: bad_read,
-		ioctl: lib_oss_mixer_ioctl,
-		fcntl: oss_mixer_fcntl,
-		mmap: bad_mmap,
-		munmap: bad_munmap,
+		.close = lib_oss_mixer_close,
+		.write = bad_write,
+		.read = bad_read,
+		.ioctl = lib_oss_mixer_ioctl,
+		.fcntl = oss_mixer_fcntl,
+		.mmap = bad_mmap,
+		.munmap = bad_munmap,
 	},
 };
 
@@ -253,6 +259,7 @@ int open(const char *file, int oflag, ...)
 	if (is_dsp_device(file)) {
 		fd = lib_oss_pcm_open(file, oflag);
 		if (fd >= 0) {
+			int nfds;
 			fds[fd] = calloc(sizeof(fd_t), 1);
 			if (fds[fd] == NULL) {
 				ops[FD_OSS_DSP].close(fd);
@@ -261,7 +268,11 @@ int open(const char *file, int oflag, ...)
 			}
 			fds[fd]->class = FD_OSS_DSP;
 			fds[fd]->oflags = oflag;
-			poll_fds_add += lib_oss_pcm_poll_fds(fd);
+			nfds = lib_oss_pcm_poll_fds(fd);
+			if (nfds > 0) {
+				fds[fd]->poll_fds = nfds;
+				poll_fds_add += nfds;
+			}
 		}
 	} else if (is_mixer_device(file)) {
 		fd = lib_oss_mixer_open(file, oflag);
@@ -288,16 +299,20 @@ int close(int fd)
 	if (!initialized)
 		initialize();
 
-	if (fd < 0 || fd >= open_max || fds[fd] == NULL) {
+	if (! is_oss_device(fd)) {
 		return _close(fd);
 	} else {
 		fd_t *xfd = fds[fd];
 		int err;
 
 		fds[fd] = NULL;
-		poll_fds_add -= lib_oss_pcm_poll_fds(fd);
+		poll_fds_add -= xfd->poll_fds;
+		if (poll_fds_add < 0) {
+			fprintf(stderr, "alsa-oss: poll_fds_add screwed up!\n");
+			poll_fds_add = 0;
+		}
 		err = ops[xfd->class].close(fd);
-		assert(err >= 0);
+		// assert(err >= 0);
 		return err;
 	}
 }
@@ -307,7 +322,7 @@ ssize_t write(int fd, const void *buf, size_t n)
 	if (!initialized)
 		initialize();
 
-	if (fd < 0 || fd >= open_max || fds[fd] == NULL)
+	if (! is_oss_device(fd))
 		return _write(fd, buf, n);
 	else
 		return ops[fds[fd]->class].write(fd, buf, n);
@@ -318,7 +333,7 @@ ssize_t read(int fd, void *buf, size_t n)
 	if (!initialized)
 		initialize();
 
-	if (fd < 0 || fd >= open_max || fds[fd] == NULL)
+	if (! is_oss_device(fd))
 		return _read(fd, buf, n);
 	else
 		return ops[fds[fd]->class].read(fd, buf, n);
@@ -335,7 +350,7 @@ int ioctl(int fd, unsigned long request, ...)
 	va_start(args, request);
 	arg = va_arg(args, void *);
 	va_end(args);
-	if (fd < 0 || fd >= open_max || fds[fd] == NULL)
+	if (! is_oss_device(fd))
 		return _ioctl(fd, request, arg);
 	else
 		return ops[fds[fd]->class].ioctl(fd, request, arg);
@@ -352,7 +367,7 @@ int fcntl(int fd, int cmd, ...)
 	va_start(args, cmd);
 	arg = va_arg(args, void *);
 	va_end(args);
-	if (fd < 0 || fd >= open_max || fds[fd] == NULL)
+	if (! is_oss_device(fd))
 		return _fcntl(fd, cmd, arg);
 	else
 		return ops[fds[fd]->class].fcntl(fd, cmd, arg);
@@ -365,7 +380,7 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
 	if (!initialized)
 		initialize();
 
-	if (fd < 0 || fd >= open_max || fds[fd] == NULL)
+	if (! is_oss_device(fd))
 		return _mmap(addr, len, prot, flags, fd, offset);
 	result = ops[fds[fd]->class].mmap(addr, len, prot, flags, fd, offset);
 	if (result != NULL && result != MAP_FAILED)
@@ -445,26 +460,37 @@ void dump_select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 }
 #endif
 
+static int poll_with_pcm(struct pollfd *pfds, unsigned long nfds, int timeout);
+
 int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 {
 	unsigned int k;
-	unsigned int nfds1;
-	int count, count1;
-	int direct = 1;
-	struct pollfd pfds1[nfds + poll_fds_add + 16];
 
 	if (!initialized)
 		initialize();
 
+	for (k = 0; k < nfds; ++k) {
+		int fd = pfds[k].fd;
+		if (! is_oss_device(fd))
+			continue;
+		if (fds[fd]->class == FD_OSS_DSP)
+			return poll_with_pcm(pfds, nfds, timeout);
+	}
+	return _poll(pfds, nfds, timeout);
+}
+
+
+static int poll_with_pcm(struct pollfd *pfds, unsigned long nfds, int timeout)
+{
+	unsigned int k;
+	unsigned int nfds1;
+	int count;
+	struct pollfd pfds1[nfds + poll_fds_add + 16];
+
 	nfds1 = 0;
 	for (k = 0; k < nfds; ++k) {
 		int fd = pfds[k].fd;
-		pfds[k].revents = 0;
-		if (fd >= open_max || !fds[fd])
-			goto _std1;
-		switch (fds[fd]->class) {
-		case FD_OSS_DSP:
-		{
+		if (is_oss_device(fd) && fds[fd]->class == FD_OSS_DSP) {
 			unsigned short events = pfds[k].events;
 			int fmode = 0;
 			if ((events & (POLLIN|POLLOUT)) == (POLLIN|POLLOUT))
@@ -473,21 +499,20 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 				fmode = O_RDONLY;
 			else
 				fmode = O_WRONLY;
-			nfds1 += lib_oss_pcm_poll_prepare(fd, fmode, &pfds1[nfds1]);
-			direct = 0;
-			break;
-		}
-		default:
-		_std1:
-			pfds1[nfds1].fd = pfds[k].fd;
-			pfds1[nfds1].events = pfds[k].events;
-			pfds1[nfds1].revents = 0;
+			count = lib_oss_pcm_poll_prepare(fd, fmode, &pfds1[nfds1]);
+			if (count < 0)
+				return -1;
+			nfds1 += count;
+		} else {
+			pfds1[nfds1] = pfds[k];
 			nfds1++;
-			break;
+		}
+		if (nfds1 > nfds + poll_fds_add) {
+			fprintf(stderr, "alsa-oss: Pollfd overflow!\n");
+			errno = EINVAL;
+			return -1;
 		}
 	}
-	if (direct)
-		return _poll(pfds, nfds, timeout);
 #ifdef DEBUG_POLL
 	if (oss_wrapper_debug) {
 		fprintf(stderr, "Orig enter ");
@@ -500,15 +525,11 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 	if (count <= 0)
 		return count;
 	nfds1 = 0;
-	count1 = 0;
+	count = 0;
 	for (k = 0; k < nfds; ++k) {
 		int fd = pfds[k].fd;
 		unsigned int revents;
-		if (fd >= open_max || !fds[fd])
-			goto _std2;
-		switch (fds[fd]->class) {
-		case FD_OSS_DSP:
-		{
+		if (is_oss_device(fd) && fds[fd]->class == FD_OSS_DSP) {
 			int result = lib_oss_pcm_poll_result(fd, &pfds1[nfds1]);
 			revents = 0;
 			if (result < 0) {
@@ -519,17 +540,13 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 					   ((result & OSS_WAIT_EVENT_WRITE) ? POLLOUT : 0);
 			}
 			nfds1 += lib_oss_pcm_poll_fds(fd);
-			break;
-		}
-		default:
-		_std2:
+		} else {
 			revents = pfds1[nfds1].revents;
 			nfds1++;
-			break;
 		}
 		pfds[k].revents = revents;
 		if (revents)
-			count1++;
+			count++;
 	}
 #ifdef DEBUG_POLL
 	if (oss_wrapper_debug) {
@@ -539,33 +556,51 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 		dump_poll(pfds, nfds, timeout);
 	}
 #endif
-	return count1;
+	return count;
 }
+
+static int select_with_pcm(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
+			   struct timeval *timeout);
 
 int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 	   struct timeval *timeout)
 {
-	fd_set _rfds1, _wfds1, _efds1;
-	fd_set *rfds1, *wfds1, *efds1;
-	int nfds1 = nfds;
-	int count, count1;
 	int fd;
-	int direct = 1;
 
 	if (!initialized)
 		initialize();
 
-	if (rfds) {
+	for (fd = 0; fd < nfds; ++fd) {
+		int r = (rfds && FD_ISSET(fd, rfds));
+		int w = (wfds && FD_ISSET(fd, wfds));
+		int e = (efds && FD_ISSET(fd, efds));
+		if (!(r || w || e))
+			continue;
+		if (is_oss_device(fd) && fds[fd]->class == FD_OSS_DSP)
+			return select_with_pcm(nfds, rfds, wfds, efds, timeout);
+	}
+	return _select(nfds, rfds, wfds, efds, timeout);
+}
+
+
+static int select_with_pcm(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
+			   struct timeval *timeout)
+{
+	fd_set _rfds1, _wfds1, _efds1;
+	fd_set *rfds1, *wfds1, *efds1;
+	int fd;
+	int nfds1 = nfds;
+	int count;
+
+	if (rfds)
 		_rfds1 = *rfds;
-	} else {
+	else
 		FD_ZERO(&_rfds1);
-	}
 	rfds1 = &_rfds1;
-	if (wfds) {
+	if (wfds)
 		_wfds1 = *wfds;
-	} else {
+	else
 		FD_ZERO(&_wfds1);
-	}
 	wfds1 = &_wfds1;
 	if (efds) {
 		_efds1 = *efds;
@@ -579,11 +614,7 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 		int e = (efds && FD_ISSET(fd, efds));
 		if (!(r || w || e))
 			continue;
-		if (!fds[fd])
-			continue;
-		switch (fds[fd]->class) {
-		case FD_OSS_DSP:
-		{
+		if (is_oss_device(fd) && fds[fd]->class == FD_OSS_DSP) {
 			int res, fmode = 0;
 			
 			if (r & w)
@@ -604,15 +635,8 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 				FD_CLR(fd, wfds1);
 			if (e)
 				FD_CLR(fd, efds1);
-			direct = 0;
-			break;
-		}
-		default:
-			break;
 		}
 	}
-	if (direct)
-		return _select(nfds, rfds, wfds, efds, timeout);
 #ifdef DEBUG_SELECT
 	if (oss_wrapper_debug) {
 		fprintf(stderr, "Orig enter ");
@@ -633,7 +657,7 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 			FD_ZERO(efds);
 		return 0;
 	}
-	count1 = 0;
+	count = 0;
 	for (fd = 0; fd < nfds; ++fd) {
 		int r = (rfds && FD_ISSET(fd, rfds));
 		int w = (wfds && FD_ISSET(fd, wfds));
@@ -641,11 +665,7 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 		int r1, w1, e1;
 		if (!(r || w || e))
 			continue;
-		if (!fds[fd])
-			continue;
-		switch (fds[fd]->class) {
-		case FD_OSS_DSP:
-		{
+		if (is_oss_device(fd) && fds[fd]->class == FD_OSS_DSP) {
 			int result = lib_oss_pcm_select_result(fd, rfds1, wfds1, efds1);
 			r1 = w1 = e1 = 0;
 			if (result < 0 && e) {
@@ -665,13 +685,10 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 					w1 = 1;
 				}
 			}
-			break;
-		}
-		default:
+		} else {
 			r1 = (r && FD_ISSET(fd, rfds1));
 			w1 = (w && FD_ISSET(fd, wfds1));
 			e1 = (e && FD_ISSET(fd, efds1));
-			break;
 		}
 		if (r && !r1)
 			FD_CLR(fd, rfds);
@@ -680,7 +697,7 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 		if (e && !e1)
 			FD_CLR(fd, efds);
 		if (r1 || w1 || e1)
-			count1++;
+			count++;
 	}
 #ifdef DEBUG_SELECT
 	if (oss_wrapper_debug) {
@@ -690,7 +707,7 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 		dump_select(nfds, rfds, wfds, efds, timeout);
 	}
 #endif
-	return count1;
+	return count;
 }
 
 
@@ -701,8 +718,8 @@ FILE *fopen(const char* path, const char *mode)
 	if (!initialized)
 		initialize();
 
-	if(!is_dsp_device(path)) 
-		return _fopen (path, mode);
+	if (!is_dsp_device(path)) 
+		return _fopen(path, mode);
 	
 	return fake_fopen(path, mode, 0);
 }
@@ -712,17 +729,20 @@ FILE *fopen64(const char* path, const char *mode)
 	if (!initialized)   
 		initialize(); 
 
-	if(!is_dsp_device(path))
-		return _fopen (path, mode);
+	if (!is_dsp_device(path))
+		return _fopen(path, mode);
 
 	return fake_fopen(path, mode, O_LARGEFILE);
 }
 
+#if 0
 int dup(int fd)
 {
 	return fcntl(fd, F_DUPFD, 0);
 }
+#endif
 
+#if 0
 int dup2(int fd, int fd2)
 {
 	int save;
@@ -744,6 +764,7 @@ int dup2(int fd, int fd2)
 	
 	return fcntl(fd, F_DUPFD, fd2);
 }
+#endif
 
 int open64(const char *file, int oflag, ...)
 {
