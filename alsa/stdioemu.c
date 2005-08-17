@@ -55,7 +55,9 @@ static ssize_t fdc_write (void *cookie, const char *buffer, size_t size)
 	return write(fdc->fd, buffer, size);
 }
 
-static int fdc_seek (void* cookie, off64_t* position, int whence)
+static int fdc_seek (void* cookie ATTRIBUTE_UNUSED,
+		     off64_t* position ATTRIBUTE_UNUSED,
+		     int whence ATTRIBUTE_UNUSED)
 {
 	return -1;
 }
