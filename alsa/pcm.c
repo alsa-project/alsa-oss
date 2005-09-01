@@ -617,6 +617,31 @@ static int oss_dsp_open(int card, int device, int oflag, mode_t mode ATTRIBUTE_U
 	return -1;
 }
 
+static int xrun(snd_pcm_t *pcm)
+{
+	switch (snd_pcm_state(pcm)) {
+	case SND_PCM_STATE_XRUN:
+		return snd_pcm_prepare(pcm);
+	case SND_PCM_STATE_DRAINING:
+		if (snd_pcm_stream(pcm) == SND_PCM_STREAM_CAPTURE)
+			return snd_pcm_prepare(pcm);
+		break;
+	default:
+		break;
+	}
+	return -EIO;
+}
+
+static int resume(snd_pcm_t *pcm)
+{
+	int res;
+	while ((res = snd_pcm_resume(pcm)) == -EAGAIN)
+		sleep(1);
+	if (! res)
+		return 0;
+	return snd_pcm_prepare(pcm);
+}
+
 ssize_t lib_oss_pcm_write(int fd, const void *buf, size_t n)
 {
 	ssize_t result;
@@ -640,25 +665,20 @@ ssize_t lib_oss_pcm_write(int fd, const void *buf, size_t n)
 	frames = n / str->frame_bytes;
  _again:
 	result = snd_pcm_writei(pcm, buf, frames);
-	if (result == -EPIPE && 
-	    snd_pcm_state(pcm) == SND_PCM_STATE_XRUN &&
-	    (result = snd_pcm_prepare(pcm)) == 0)
-		goto _again;
-	if (result == -EPIPE && 
-	    snd_pcm_state(pcm) == SND_PCM_STATE_SUSPENDED) {
-	    	while ((result = snd_pcm_resume(pcm)) == -EAGAIN)
-	    		sleep(1);
-	    	if (result < 0 && (result = snd_pcm_prepare(pcm)) == 0)
-	    		goto _again;
+	if (result == -EPIPE) {
+		if (! (result = xrun(pcm)))
+			goto _again;
+	} else if (result == -ESTRPIPE) {
+		if (! (result = resume(pcm)))
+			goto _again;
 	}
 	if (result < 0) {
 		errno = -result;
 		result = -1;
 		goto _end;
-	} else {
-		str->alsa.appl_ptr += result;
-		str->alsa.appl_ptr %= str->alsa.boundary;
 	}
+	str->alsa.appl_ptr += result;
+	str->alsa.appl_ptr %= str->alsa.boundary;
 	result *= str->frame_bytes;
 	str->oss.bytes += result;
  _end:
@@ -693,25 +713,20 @@ ssize_t lib_oss_pcm_read(int fd, void *buf, size_t n)
 	frames = n / str->frame_bytes;
  _again:
 	result = snd_pcm_readi(pcm, buf, frames);
-	if (result == -EPIPE && 
-	    snd_pcm_state(pcm) == SND_PCM_STATE_XRUN &&
-	    (result = snd_pcm_prepare(pcm)) == 0)
-		goto _again;
-	if (result == -EPIPE && 
-	    snd_pcm_state(pcm) == SND_PCM_STATE_SUSPENDED) {
-	    	while ((result = snd_pcm_resume(pcm)) == -EAGAIN)
-	    		sleep(1);
-	    	if (result < 0 && (result = snd_pcm_prepare(pcm)) == 0)
-	    		goto _again;
+	if (result == -EPIPE) {
+		if (! (result = xrun(pcm)))
+			goto _again;
+	} else if (result == -ESTRPIPE) {
+		if (! (result = resume(pcm)))
+			goto _again;
 	}
 	if (result < 0) {
 		errno = -result;
 		result = -1;
 		goto _end;
-	} else {
-		str->alsa.appl_ptr += result;
-		str->alsa.appl_ptr %= str->alsa.boundary;
 	}
+	str->alsa.appl_ptr += result;
+	str->alsa.appl_ptr %= str->alsa.boundary;
 	result *= str->frame_bytes;
 	str->oss.bytes += result;
  _end:
