@@ -1,5 +1,6 @@
 lib_LTLIBRARIES = libalsatoss.la libaoss.la
 bin_SCRIPTS = aoss
+noinst_SCRIPTS = aoss.old
 man_MANS = aoss.1
 EXTRA_DIST = aoss.1
 COMPATNUM=@LIBTOOL_VERSION_INFO@
