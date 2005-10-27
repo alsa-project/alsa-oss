@@ -4,6 +4,11 @@
 # Usage:
 #	aoss <command> <command options and arguments>
 
-prefix=@prefix@
-exec_prefix=@exec_prefix@
-LD_PRELOAD=${exec_prefix}/\$LIB/libaoss.so exec "$@"
+if [ -d /proc/asound ]; then
+  prefix=@prefix@
+  exec_prefix=@exec_prefix@
+  LD_PRELOAD=${exec_prefix}/\$LIB/libaoss.so${LD_PRELOAD:+:$LD_PRELOAD} exec "$@"
+else
+  exec "$@"
+fi
+exit 1
