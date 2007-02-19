@@ -69,6 +69,7 @@
 static int (*_select)(int n, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
 static int (*_poll)(struct pollfd *ufds, unsigned int nfds, int timeout);
 static int (*_open)(const char *file, int oflag, ...);
+static int (*_open64)(const char *file, int oflag, ...);
 static int (*_close)(int fd);
 static ssize_t (*_write)(int fd, const void *buf, size_t n);
 static ssize_t (*_read)(int fd, void *buf, size_t n);
@@ -78,6 +79,7 @@ static void *(*_mmap)(void *addr, size_t len, int prot, int flags, int fd, off_t
 static int (*_munmap)(void* addr, size_t len);
 
 static FILE *(*_fopen)(const char *path, const char *mode);
+static FILE *(*_fopen64)(const char *path, const char *mode);
 
 typedef struct ops {
 	int (*close)(int fd);
@@ -242,57 +244,73 @@ static ops_t ops[FD_CLASSES] = {
 	},
 };
 
-int open(const char *file, int oflag, ...)
+static int dsp_open_helper(const char *file, int oflag)
 {
-	va_list args;
-	mode_t mode = 0;
 	int fd;
-
-	if (!initialized)
-		initialize();
-
-	if (oflag & O_CREAT) {
-		va_start(args, oflag);
-		mode = va_arg(args, mode_t);
-		va_end(args);
-	}
-	if (is_dsp_device(file)) {
-		fd = lib_oss_pcm_open(file, oflag);
-		if (fd >= 0) {
-			int nfds;
-			fds[fd] = calloc(sizeof(fd_t), 1);
-			if (fds[fd] == NULL) {
-				ops[FD_OSS_DSP].close(fd);
-				errno = ENOMEM;
-				return -1;
-			}
-			fds[fd]->class = FD_OSS_DSP;
-			fds[fd]->oflags = oflag;
-			nfds = lib_oss_pcm_poll_fds(fd);
-			if (nfds > 0) {
-				fds[fd]->poll_fds = nfds;
-				poll_fds_add += nfds;
-			}
+	fd = lib_oss_pcm_open(file, oflag);
+	if (fd >= 0) {
+		int nfds;
+		fds[fd] = calloc(sizeof(fd_t), 1);
+		if (fds[fd] == NULL) {
+			ops[FD_OSS_DSP].close(fd);
+			errno = ENOMEM;
+			return -1;
 		}
-	} else if (is_mixer_device(file)) {
-		fd = lib_oss_mixer_open(file, oflag);
-		if (fd >= 0) {
-			fds[fd] = calloc(sizeof(fd_t), 1);
-			if (fds[fd] == NULL) {
-				ops[FD_OSS_MIXER].close(fd);
-				errno = ENOMEM;
-				return -1;
-			}
-			fds[fd]->class = FD_OSS_MIXER;
-			fds[fd]->oflags = oflag;
+		fds[fd]->class = FD_OSS_DSP;
+		fds[fd]->oflags = oflag;
+		nfds = lib_oss_pcm_poll_fds(fd);
+		if (nfds > 0) {
+			fds[fd]->poll_fds = nfds;
+			poll_fds_add += nfds;
 		}
-	} else {
-		fd = _open(file, oflag, mode);
-		if (fd >= 0)
-			assert(fds[fd] == NULL);
 	}
 	return fd;
 }
+
+static int mixer_open_helper(const char *file, int oflag)
+{
+	int fd;
+	fd = lib_oss_mixer_open(file, oflag);
+	if (fd >= 0) {
+		fds[fd] = calloc(sizeof(fd_t), 1);
+		if (fds[fd] == NULL) {
+			ops[FD_OSS_MIXER].close(fd);
+			errno = ENOMEM;
+			return -1;
+		}
+		fds[fd]->class = FD_OSS_MIXER;
+		fds[fd]->oflags = oflag;
+	}
+	return fd;
+} 
+
+#define DECL_OPEN(name, callback) \
+int name(const char *file, int oflag, ...) \
+{ \
+	va_list args; \
+	mode_t mode = 0; \
+	int fd; \
+	if (!initialized) \
+		initialize(); \
+	if (oflag & O_CREAT) { \
+		va_start(args, oflag); \
+		mode = va_arg(args, mode_t); \
+		va_end(args); \
+	} \
+	if (is_dsp_device(file)) \
+		fd = dsp_open_helper(file, oflag); \
+	else if (is_mixer_device(file)) \
+		fd = mixer_open_helper(file, oflag); \
+	else { \
+		fd = callback(file, oflag, mode); \
+		if (fd >= 0) \
+			assert(fds[fd] == NULL); \
+	} \
+	return fd; \
+}
+
+DECL_OPEN(open, _open)
+DECL_OPEN(open64, _open64)
 
 int close(int fd)
 {
@@ -730,7 +748,7 @@ FILE *fopen64(const char* path, const char *mode)
 		initialize(); 
 
 	if (!is_dsp_device(path))
-		return _fopen(path, mode);
+		return _fopen64(path, mode);
 
 	return fake_fopen(path, mode, O_LARGEFILE);
 }
@@ -766,19 +784,6 @@ int dup2(int fd, int fd2)
 }
 #endif
 
-int open64(const char *file, int oflag, ...)
-{
-	va_list args;
-	mode_t mode = 0;
-
-	if (oflag & O_CREAT) {
-		va_start(args, oflag);
-		mode = va_arg(args, mode_t);
-		va_end(args);
-	}
-	return open(file, oflag | O_LARGEFILE, mode);
-}
-
 # define strong_alias(name, aliasname) \
   extern __typeof (name) aliasname __attribute__ ((alias (#name)));
 
@@ -809,6 +814,7 @@ static void initialize()
 	if (!fds)
 		exit(1);
 	_open = dlsym(RTLD_NEXT, "open");
+	_open64 = dlsym(RTLD_NEXT, "open64");
 	_close = dlsym(RTLD_NEXT, "close");
 	_write = dlsym(RTLD_NEXT, "write");
 	_read = dlsym(RTLD_NEXT, "read");
@@ -819,5 +825,6 @@ static void initialize()
 	_select = dlsym(RTLD_NEXT, "select");
 	_poll = dlsym(RTLD_NEXT, "poll");
 	_fopen = dlsym(RTLD_NEXT, "fopen");
+	_fopen64 = dlsym(RTLD_NEXT, "fopen64");
 	initialized = 1;
 }
