@@ -215,10 +215,10 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 		unsigned int rate, periods_min;
 		if (!pcm)
 			continue;
+		dsp->format = oss_format_to_alsa(dsp->oss_format);
 		str->frame_bytes = snd_pcm_format_physical_width(dsp->format) * dsp->channels / 8;
 		snd_pcm_hw_params_alloca(&hw);
 		snd_pcm_hw_params_any(pcm, hw);
-		dsp->format = oss_format_to_alsa(dsp->oss_format);
 
 		err = snd_pcm_hw_params_set_format(pcm, hw, dsp->format);
 		if (err < 0)
