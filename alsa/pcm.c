@@ -1,7 +1,7 @@
 /*
  *  OSS -> ALSA compatibility layer
  *  Copyright (c) by Abramo Bagnara <abramo@alsa-project.org>,
- *		     Jaroslav Kysela <perex@suse.cz>
+ *		     Jaroslav Kysela <perex@perex.cz>
  *
  *
  *   This program is free software; you can redistribute it and/or modify
