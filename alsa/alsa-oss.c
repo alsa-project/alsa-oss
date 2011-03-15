@@ -687,19 +687,23 @@ static int select_with_pcm(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 			int result = lib_oss_pcm_select_result(fd, rfds1, wfds1, efds1);
 			r1 = w1 = e1 = 0;
 			if (result < 0 && e) {
-				FD_SET(fd, efds);
+				if (efds)
+					FD_SET(fd, efds);
 				e1 = 1;
 			} else {
 				if (result & OSS_WAIT_EVENT_ERROR) {
-					FD_SET(fd, efds);
+					if (efds)
+						FD_SET(fd, efds);
 					e1 = 1;
 				}
 				if (result & OSS_WAIT_EVENT_READ) {
-					FD_SET(fd, rfds);
+					if (rfds)
+						FD_SET(fd, rfds);
 					r1 = 1;
 				}
 				if (result & OSS_WAIT_EVENT_WRITE) {
-					FD_SET(fd, wfds);
+					if (wfds)
+						FD_SET(fd, wfds);
 					w1 = 1;
 				}
 			}
@@ -708,11 +712,11 @@ static int select_with_pcm(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 			w1 = (w && FD_ISSET(fd, wfds1));
 			e1 = (e && FD_ISSET(fd, efds1));
 		}
-		if (r && !r1)
+		if (r && !r1 && rfds)
 			FD_CLR(fd, rfds);
-		if (w && !w1)
+		if (w && !w1 && wfds)
 			FD_CLR(fd, wfds);
-		if (e && !e1)
+		if (e && !e1 && efds)
 			FD_CLR(fd, efds);
 		if (r1 || w1 || e1)
 			count++;
