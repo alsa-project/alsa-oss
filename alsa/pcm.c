@@ -1096,6 +1096,12 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 			break;
 		}
 		state = snd_pcm_state(pcm);
+		if (state == SND_PCM_STATE_XRUN) {
+			err = xrun(pcm);
+			if (err < 0)
+				break;
+			state = snd_pcm_state(pcm);
+		}
 		if (state == SND_PCM_STATE_SUSPENDED) {
 			err = resume(pcm);
 			if (err < 0)
@@ -1135,6 +1141,12 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 			break;
 		}
 		state = snd_pcm_state(pcm);
+		if (state == SND_PCM_STATE_XRUN) {
+			err = xrun(pcm);
+			if (err < 0)
+				break;
+			state = snd_pcm_state(pcm);
+		}
 		if (state == SND_PCM_STATE_SUSPENDED) {
 			err = resume(pcm);
 			if (err < 0)
@@ -1174,6 +1186,12 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 			break;
 		}
 		state = snd_pcm_state(pcm);
+		if (state == SND_PCM_STATE_XRUN) {
+			err = xrun(pcm);
+			if (err < 0)
+				break;
+			state = snd_pcm_state(pcm);
+		}
 		if (state == SND_PCM_STATE_SUSPENDED) {
 			err = resume(pcm);
 			if (err < 0)
@@ -1220,6 +1238,12 @@ int lib_oss_pcm_ioctl(int fd, unsigned long cmd, ...)
 		if (!pcm) {
 			err = -EINVAL;
 			break;
+		}
+		if (state == SND_PCM_STATE_XRUN) {
+			err = xrun(pcm);
+			if (err < 0)
+				break;
+			state = snd_pcm_state(pcm);
 		}
 		state = snd_pcm_state(pcm);
 		if (state == SND_PCM_STATE_SUSPENDED) {
