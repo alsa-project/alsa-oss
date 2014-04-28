@@ -308,8 +308,8 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 		if (err < 0)
 			return err;
 #if 0
-		if (alsa_oss_debug)
-			snd_pcm_dump_setup(pcm, stderr);
+		if (alsa_oss_debug && alsa_oss_debug_out)
+			snd_pcm_dump_setup(pcm, alsa_oss_debug_out);
 #endif
 		if (err < 0)
 			return err;
