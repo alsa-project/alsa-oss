@@ -6,8 +6,8 @@
 
 if [ -d /proc/asound ]; then
   prefix=@prefix@
-  libdir=@libdir@
-  LD_PRELOAD=${libdir}/libaoss.so${LD_PRELOAD:+:$LD_PRELOAD} exec "$@"
+  exec_prefix=@exec_prefix@
+  LD_PRELOAD=${exec_prefix}/\$LIB/libaoss.so${LD_PRELOAD:+:$LD_PRELOAD} exec "$@"
 else
   exec "$@"
 fi
