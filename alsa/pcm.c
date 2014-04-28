@@ -263,10 +263,11 @@ static int oss_dsp_hw_params(oss_dsp_t *dsp)
 			if (err < 0)
 				return err;
 			periods_min = 2;
-			err = snd_pcm_hw_params_set_periods_min(pcm, hw, &periods_min, 0);
-			if (err < 0)
-				return err;
-			if (dsp->maxfrags > 0) {
+			if (!dsp->maxfrags) {
+				err = snd_pcm_hw_params_set_periods_min(pcm, hw, &periods_min, 0);
+				if (err < 0)
+					return err;
+			} else {
 				unsigned int periods_max = periods_min > dsp->maxfrags
 					? periods_min : dsp->maxfrags;
 				err = snd_pcm_hw_params_set_periods_max(pcm, hw,
