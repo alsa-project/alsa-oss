@@ -1,5 +1,5 @@
 AC_PREREQ(2.59)
-AC_INIT(alsa-oss, 1.0.25)
+AC_INIT(alsa-oss, 1.0.28)
 AM_INIT_AUTOMAKE
 
 AM_MAINTAINER_MODE([enable])
