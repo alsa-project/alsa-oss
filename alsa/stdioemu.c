@@ -37,7 +37,6 @@
 #endif
 
 #include <stdio.h>
-#include <libio.h>
 
 struct fd_cookie {
 	int fd;
