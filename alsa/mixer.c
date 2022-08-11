@@ -35,7 +35,7 @@
 #include <limits.h>
 #include <errno.h>
 #include <assert.h>
-#include <linux/soundcard.h>
+#include <sys/soundcard.h>
 #include <alsa/asoundlib.h>
 
 #include "alsa-local.h"
