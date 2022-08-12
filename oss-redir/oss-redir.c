@@ -32,7 +32,7 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #include <errno.h>
-#include <linux/soundcard.h>
+#include <sys/soundcard.h>
 
 static int initialized = 0;
 static int native_oss = 1;
