@@ -62,4 +62,16 @@ extern int lib_oss_mixer_open(const char *pathname, int flags, ...);
 extern int lib_oss_mixer_close(int fd);
 extern int lib_oss_mixer_ioctl(int fd, unsigned long int request, ...);
 
+extern int lib_oss_seq_open(const char *pathname, int flags);
+extern int lib_oss_seq_close(int fd);
+extern ssize_t lib_oss_seq_read(int fd, void *buf, size_t count);
+extern ssize_t lib_oss_seq_write(int fd, const void *buf, size_t count);
+extern int lib_oss_seq_ioctl(int fd, unsigned long int request, ...);
+extern int lib_oss_seq_poll_fds(int fd);
+extern int lib_oss_seq_poll_prepare(int fd, int fmode, struct pollfd *ufds);
+extern int lib_oss_seq_poll_result(int fd, struct pollfd *ufds);
+extern int lib_oss_seq_select_prepare(int fd, int fmode, fd_set *rfds, fd_set *wfds, fd_set *efds);
+extern int lib_oss_seq_select_result(int fd, fd_set *rfds, fd_set *wfds, fd_set *efds);
+/* Note: wfds/efds are unused in the select helpers above */
+
 #endif /* __ALSA_OSS_EMUL_H */

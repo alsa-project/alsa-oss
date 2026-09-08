@@ -94,6 +94,7 @@ typedef struct ops {
 typedef enum {
 	FD_OSS_DSP,
 	FD_OSS_MIXER,
+	FD_OSS_SEQ,
 	FD_CLASSES,
 } fd_class_t;                                                            
 
@@ -119,6 +120,10 @@ static inline int is_oss_device(int fd)
 	return fd >= 0 && fd < open_max && fds[fd];
 }
 
+#define is_oss_pcm_class(fd)	(fds[fd]->class == FD_OSS_DSP)
+#define is_oss_seq_class(fd)	(fds[fd]->class == FD_OSS_SEQ)
+#define is_oss_pcm_or_seq_class(fd)	(is_oss_pcm_class(fd) || is_oss_seq_class(fd))
+
 static int is_dsp_device(const char *pathname)
 {
 	if(!pathname) return 0;
@@ -136,6 +141,14 @@ static int is_mixer_device(const char *pathname)
 	if(!pathname) return 0;
 	if(strncmp(pathname,"/dev/mixer",10) == 0) return 1;
 	if(strncmp(pathname,"/dev/sound/mixer",16) == 0) return 1;
+	return 0;
+}
+
+static int is_seq_device(const char *pathname)
+{
+	if(!pathname) return 0;
+	if(strncmp(pathname,"/dev/sequencer",14) == 0) return 1;
+	if(strncmp(pathname,"/dev/music",10) == 0) return 1;
 	return 0;
 }
 
@@ -171,6 +184,27 @@ static int oss_pcm_fcntl(int fd, int cmd, ...)
 		return result;
 	}
 	return -1;
+}
+
+static int oss_seq_fcntl(int fd, int cmd, ...)
+{
+	va_list args;
+	long arg;
+
+	va_start(args, cmd);
+	arg = va_arg(args, long);
+	va_end(args);
+
+	switch (cmd) {
+	case F_GETFL:
+		return fds[fd]->oflags;
+	case F_SETFL:
+		fds[fd]->oflags = (fds[fd]->oflags & ~O_NONBLOCK) |
+			(arg & O_NONBLOCK);
+		return 0;
+	default:
+		return _fcntl(fd, cmd, arg);
+	}
 }
 
 static int oss_mixer_fcntl(int fd, int cmd, ...)
@@ -242,6 +276,15 @@ static ops_t ops[FD_CLASSES] = {
 		.mmap = bad_mmap,
 		.munmap = bad_munmap,
 	},
+        [FD_OSS_SEQ] = {
+		.close = lib_oss_seq_close,
+		.write = lib_oss_seq_write,
+		.read = lib_oss_seq_read,
+		.ioctl = lib_oss_seq_ioctl,
+		.fcntl = oss_seq_fcntl,
+		.mmap = bad_mmap,
+		.munmap = bad_munmap,
+	},
 };
 
 static int dsp_open_helper(const char *file, int oflag)
@@ -282,6 +325,29 @@ static int mixer_open_helper(const char *file, int oflag)
 		fds[fd]->oflags = oflag;
 	}
 	return fd;
+}
+
+static int seq_open_helper(const char *file, int oflag)
+{
+	int fd;
+	fd = lib_oss_seq_open(file, oflag);
+	if (fd >= 0) {
+		int nfds;
+		fds[fd] = calloc(sizeof(fd_t), 1);
+		if (fds[fd] == NULL) {
+			ops[FD_OSS_SEQ].close(fd);
+			errno = ENOMEM;
+			return -1;
+		}
+		fds[fd]->class = FD_OSS_SEQ;
+		fds[fd]->oflags = oflag;
+		nfds = lib_oss_seq_poll_fds(fd);
+		if (nfds > 0) {
+			fds[fd]->poll_fds = nfds;
+			poll_fds_add += nfds;
+		}
+	}
+	return fd;
 } 
 
 #define DECL_OPEN(name, callback) \
@@ -301,6 +367,8 @@ int name(const char *file, int oflag, ...) \
 		fd = dsp_open_helper(file, oflag); \
 	else if (is_mixer_device(file)) \
 		fd = mixer_open_helper(file, oflag); \
+	else if (is_seq_device(file)) \
+		fd = seq_open_helper(file, oflag); \
 	else { \
 		fd = callback(file, oflag, mode); \
 		if (fd >= 0) \
@@ -478,7 +546,7 @@ void dump_select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 }
 #endif
 
-static int poll_with_pcm(struct pollfd *pfds, unsigned long nfds, int timeout);
+static int poll_with_pcm_or_seq(struct pollfd *pfds, unsigned long nfds, int timeout);
 
 int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 {
@@ -491,14 +559,14 @@ int poll(struct pollfd *pfds, unsigned long nfds, int timeout)
 		int fd = pfds[k].fd;
 		if (! is_oss_device(fd))
 			continue;
-		if (fds[fd]->class == FD_OSS_DSP)
-			return poll_with_pcm(pfds, nfds, timeout);
+		if (is_oss_pcm_or_seq_class(fd))
+			return poll_with_pcm_or_seq(pfds, nfds, timeout);
 	}
 	return _poll(pfds, nfds, timeout);
 }
 
 
-static int poll_with_pcm(struct pollfd *pfds, unsigned long nfds, int timeout)
+static int poll_with_pcm_or_seq(struct pollfd *pfds, unsigned long nfds, int timeout)
 {
 	unsigned int k;
 	unsigned int nfds1;
@@ -508,7 +576,7 @@ static int poll_with_pcm(struct pollfd *pfds, unsigned long nfds, int timeout)
 	nfds1 = 0;
 	for (k = 0; k < nfds; ++k) {
 		int fd = pfds[k].fd;
-		if (is_oss_device(fd) && fds[fd]->class == FD_OSS_DSP) {
+		if (is_oss_device(fd) && is_oss_pcm_or_seq_class(fd)) {
 			unsigned short events = pfds[k].events;
 			int fmode = 0;
 			if ((events & (POLLIN|POLLOUT)) == (POLLIN|POLLOUT))
@@ -517,7 +585,10 @@ static int poll_with_pcm(struct pollfd *pfds, unsigned long nfds, int timeout)
 				fmode = O_RDONLY;
 			else
 				fmode = O_WRONLY;
-			count = lib_oss_pcm_poll_prepare(fd, fmode, &pfds1[nfds1]);
+			if (is_oss_pcm_class(fd))
+				count = lib_oss_pcm_poll_prepare(fd, fmode, &pfds1[nfds1]);
+			else
+				count = lib_oss_seq_poll_prepare(fd, fmode, &pfds1[nfds1]);
 			if (count < 0)
 				return -1;
 			nfds1 += count;
@@ -547,8 +618,13 @@ static int poll_with_pcm(struct pollfd *pfds, unsigned long nfds, int timeout)
 	for (k = 0; k < nfds; ++k) {
 		int fd = pfds[k].fd;
 		unsigned int revents;
-		if (is_oss_device(fd) && fds[fd]->class == FD_OSS_DSP) {
-			int result = lib_oss_pcm_poll_result(fd, &pfds1[nfds1]);
+		if (is_oss_device(fd) && is_oss_pcm_or_seq_class(fd)) {
+			int result;
+
+			if (is_oss_pcm_class(fd))
+				result = lib_oss_pcm_poll_result(fd, &pfds1[nfds1]);
+			else
+				result = lib_oss_seq_poll_result(fd, &pfds1[nfds1]);
 			revents = 0;
 			if (result < 0) {
 				revents |= POLLNVAL;
@@ -557,7 +633,10 @@ static int poll_with_pcm(struct pollfd *pfds, unsigned long nfds, int timeout)
 					   ((result & OSS_WAIT_EVENT_READ) ? POLLIN : 0) |
 					   ((result & OSS_WAIT_EVENT_WRITE) ? POLLOUT : 0);
 			}
-			nfds1 += lib_oss_pcm_poll_fds(fd);
+			if (is_oss_pcm_class(fd))
+				nfds1 += lib_oss_pcm_poll_fds(fd);
+			else
+				nfds1 += lib_oss_seq_poll_fds(fd);
 		} else {
 			revents = pfds1[nfds1].revents;
 			nfds1++;
@@ -577,8 +656,8 @@ static int poll_with_pcm(struct pollfd *pfds, unsigned long nfds, int timeout)
 	return count;
 }
 
-static int select_with_pcm(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
-			   struct timeval *timeout);
+static int select_with_pcm_or_seq(int nfds, fd_set *rfds, fd_set *wfds,
+				  fd_set *efds, struct timeval *timeout);
 
 int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 	   struct timeval *timeout)
@@ -594,15 +673,15 @@ int select(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 		int e = (efds && FD_ISSET(fd, efds));
 		if (!(r || w || e))
 			continue;
-		if (is_oss_device(fd) && fds[fd]->class == FD_OSS_DSP)
-			return select_with_pcm(nfds, rfds, wfds, efds, timeout);
+		if (is_oss_device(fd) && is_oss_pcm_or_seq_class(fd))
+			return select_with_pcm_or_seq(nfds, rfds, wfds, efds, timeout);
 	}
 	return _select(nfds, rfds, wfds, efds, timeout);
 }
 
 
-static int select_with_pcm(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
-			   struct timeval *timeout)
+static int select_with_pcm_or_seq(int nfds, fd_set *rfds, fd_set *wfds,
+				  fd_set *efds, struct timeval *timeout)
 {
 	fd_set _rfds1, _wfds1, _efds1;
 	fd_set *rfds1, *wfds1, *efds1;
@@ -632,7 +711,7 @@ static int select_with_pcm(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 		int e = (efds && FD_ISSET(fd, efds));
 		if (!(r || w || e))
 			continue;
-		if (is_oss_device(fd) && fds[fd]->class == FD_OSS_DSP) {
+		if (is_oss_device(fd) && is_oss_pcm_or_seq_class(fd)) {
 			int res, fmode = 0;
 			
 			if (r & w)
@@ -641,8 +720,12 @@ static int select_with_pcm(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 				fmode = O_RDONLY;
 			else
 				fmode = O_WRONLY;
-			res = lib_oss_pcm_select_prepare(fd, fmode, rfds1, wfds1,
-							 e ? efds1 : NULL);
+			if (is_oss_pcm_class(fd))
+				res = lib_oss_pcm_select_prepare(fd, fmode, rfds1, wfds1,
+								 e ? efds1 : NULL);
+			else
+				res = lib_oss_seq_select_prepare(fd, fmode, rfds1, wfds1,
+								 e ? efds1 : NULL);
 			if (res < 0)
 				return -1;
 			if (nfds1 < res + 1)
@@ -683,8 +766,13 @@ static int select_with_pcm(int nfds, fd_set *rfds, fd_set *wfds, fd_set *efds,
 		int r1, w1, e1;
 		if (!(r || w || e))
 			continue;
-		if (is_oss_device(fd) && fds[fd]->class == FD_OSS_DSP) {
-			int result = lib_oss_pcm_select_result(fd, rfds1, wfds1, efds1);
+		if (is_oss_device(fd) && is_oss_pcm_or_seq_class(fd)) {
+			int result;
+
+			if (is_oss_pcm_class(fd))
+				result = lib_oss_pcm_select_result(fd, rfds1, wfds1, efds1);
+			else
+				result = lib_oss_seq_select_result(fd, rfds1, wfds1, efds1);
 			r1 = w1 = e1 = 0;
 			if (result < 0 && e) {
 				if (efds)
