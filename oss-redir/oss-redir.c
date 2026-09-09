@@ -157,14 +157,15 @@ static inline void check_initialized(void)
 		initialize();
 }
 
-int oss_pcm_open(const char *pathname, int flags, ...)
+static int call_open(const char *pathname, int flags,
+		     int (*__open)(const char *pathname, int flags))
 {
 	int result;
 
 	check_initialized();
 	if (native_oss)
 		return open(pathname, flags);
-	result = x_oss_pcm_open(pathname, flags);
+	result = __open(pathname, flags);
 	if (result >= 0) {
 		open_count++;
 	} else {
@@ -174,90 +175,50 @@ int oss_pcm_open(const char *pathname, int flags, ...)
 		}
 	}
 	return result;
+}
+
+static int call_close(int fd, int (*__close)(int fd))
+{
+	int result;
+
+	if (native_oss)
+		return close(fd);
+	result = __close(fd);
+	if (--open_count) {
+		dlclose(dl_handle);
+		dl_handle = NULL;
+	}
+	return result;
+}
+
+int oss_pcm_open(const char *pathname, int flags, ...)
+{
+	return call_open(pathname, flags, x_oss_pcm_open);
 }
 
 int oss_pcm_close(int fd)
 {
-	int result;
-
-	if (native_oss)
-		return close(fd);
-	result = x_oss_pcm_close(fd);
-	if (--open_count) {
-		dlclose(dl_handle);
-		dl_handle = NULL;
-	}
-	return result;
+	return call_close(fd, x_oss_pcm_close);
 }
 
 int oss_mixer_open(const char *pathname, int flags, ...)
 {
-	int result;
-
-	check_initialized();
-	if (native_oss)
-		return open(pathname, flags);
-	result = x_oss_mixer_open(pathname, flags);
-	if (result >= 0) {
-		open_count++;
-	} else {
-		if (open_count == 0) {
-			dlclose(dl_handle);
-			dl_handle = NULL;
-		}
-	}
-	return result;
+	return call_open(pathname, flags, x_oss_mixer_open);
 }
 
 int oss_mixer_close(int fd)
 {
-	int result;
-
-	if (fd < 0)
-		return -EINVAL;
-	if (native_oss)
-		return close(fd);
-	result = x_oss_mixer_close(fd);
-	if (--open_count) {
-		dlclose(dl_handle);
-		dl_handle = NULL;
-	}
-	return result;
+	return call_close(fd, x_oss_mixer_close);
 }
 
 int oss_seq_open(const char *pathname, int flags, ...)
 {
-	int result;
-
-	check_initialized();
-	if (native_oss)
-		return open(pathname, flags);
-	result = x_oss_seq_open(pathname, flags);
-	if (result >= 0) {
-		open_count++;
-	} else {
-		if (open_count == 0) {
-			dlclose(dl_handle);
-			dl_handle = NULL;
-		}
-	}
-	return result;
+	return call_open(pathname, flags, x_oss_seq_open);
 }
 
 int oss_seq_close(int fd)
 {
-	int result;
-
-	if (fd < 0)
-		return -EINVAL;
-	if (native_oss)
-		return close(fd);
-	result = x_oss_seq_close(fd);
-	if (--open_count) {
-		dlclose(dl_handle);
-		dl_handle = NULL;
-	}
-	return result;
+	return call_close(fd, x_oss_seq_close);
 }
 
 static void initialize(void)
