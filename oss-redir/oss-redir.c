@@ -60,6 +60,18 @@ static int (*x_oss_mixer_open)(const char *pathname, int flags);
 static int (*x_oss_mixer_close)(int fd);
 int (*oss_mixer_ioctl)(int fd, unsigned long int request, ...);
 
+static int (*x_oss_seq_open)(const char *pathname, int flags);
+static int (*x_oss_seq_close)(int fd);
+int (*oss_seq_nonblock)(int fd, int nonblock);
+ssize_t (*oss_seq_read)(int fd, void *buf, size_t count);
+ssize_t (*oss_seq_write)(int fd, const void *buf, size_t count);
+int (*oss_seq_ioctl)(int fd, unsigned long int request, ...);
+int (*oss_seq_select_prepare)(int fd, int fmode, fd_set *readfds, fd_set *writefds, fd_set *exceptfds);
+int (*oss_seq_select_result)(int fd, fd_set *readfds, fd_set *writefds, fd_set *exceptfds);
+int (*oss_seq_poll_fds)(int fd);
+int (*oss_seq_poll_prepare)(int fd, int fmode, struct pollfd *ufds);
+int (*oss_seq_poll_result)(int fd, struct pollfd *ufds);
+
 static int native_pcm_nonblock(int fd, int nonblock)
 {
 	long flags;
@@ -213,6 +225,41 @@ int oss_mixer_close(int fd)
 	return result;
 }
 
+int oss_seq_open(const char *pathname, int flags, ...)
+{
+	int result;
+
+	check_initialized();
+	if (native_oss)
+		return open(pathname, flags);
+	result = x_oss_seq_open(pathname, flags);
+	if (result >= 0) {
+		open_count++;
+	} else {
+		if (open_count == 0) {
+			dlclose(dl_handle);
+			dl_handle = NULL;
+		}
+	}
+	return result;
+}
+
+int oss_seq_close(int fd)
+{
+	int result;
+
+	if (fd < 0)
+		return -EINVAL;
+	if (native_oss)
+		return close(fd);
+	result = x_oss_seq_close(fd);
+	if (--open_count) {
+		dlclose(dl_handle);
+		dl_handle = NULL;
+	}
+	return result;
+}
+
 static void initialize(void)
 {
 	char *s = getenv("OSS_REDIRECTOR");
@@ -240,6 +287,16 @@ static void initialize(void)
 		oss_pcm_poll_prepare = native_pcm_poll_prepare;
 		oss_pcm_poll_result = native_pcm_poll_result;
 		oss_mixer_ioctl = ioctl;
+		/* reuse PCM helpers for sequencer */
+		oss_seq_nonblock = native_pcm_nonblock;
+		oss_seq_read = read;
+		oss_seq_write = write;
+		oss_seq_ioctl = ioctl;
+		oss_seq_select_prepare = native_pcm_select_prepare;
+		oss_seq_select_result = native_pcm_select_result;
+		oss_seq_poll_fds = native_pcm_poll_fds;
+		oss_seq_poll_prepare = native_pcm_poll_prepare;
+		oss_seq_poll_result = native_pcm_poll_result;
 	} else {
 		dl_handle = dlopen(hal, RTLD_NOW);
 		if (dl_handle == NULL) {
@@ -264,5 +321,16 @@ static void initialize(void)
 		x_oss_mixer_open = dlsym(dl_handle, "lib_oss_mixer_open");
 		x_oss_mixer_close = dlsym(dl_handle, "lib_oss_mixer_close");
 		oss_mixer_ioctl = dlsym(dl_handle, "lib_oss_mixer_ioctl");
+		x_oss_seq_open = dlsym(dl_handle, "lib_oss_seq_open");
+		x_oss_seq_close = dlsym(dl_handle, "lib_oss_seq_close");
+		oss_seq_nonblock = dlsym(dl_handle, "lib_oss_seq_nonblock");
+		oss_seq_read = dlsym(dl_handle, "lib_oss_seq_read");
+		oss_seq_write = dlsym(dl_handle, "lib_oss_seq_write");
+		oss_seq_ioctl = dlsym(dl_handle, "lib_oss_seq_ioctl");
+		oss_seq_select_prepare = dlsym(dl_handle, "lib_oss_seq_select_prepare");
+		oss_seq_select_result = dlsym(dl_handle, "lib_oss_select_result");
+		oss_seq_poll_fds = dlsym(dl_handle, "lib_oss_seq_poll_fds");
+		oss_seq_poll_prepare = dlsym(dl_handle, "lib_oss_seq_poll_prepare");
+		oss_seq_poll_result = dlsym(dl_handle, "lib_oss_seq_poll_result");
 	}
 }
