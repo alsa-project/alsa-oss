@@ -121,7 +121,11 @@ static inline int is_oss_device(int fd)
 }
 
 #define is_oss_pcm_class(fd)	(fds[fd]->class == FD_OSS_DSP)
+#ifdef ENABLE_SEQUENCER
 #define is_oss_seq_class(fd)	(fds[fd]->class == FD_OSS_SEQ)
+#else
+#define is_oss_seq_class(fd)	0
+#endif /* ENABLE_SEQUENCER */
 #define is_oss_pcm_or_seq_class(fd)	(is_oss_pcm_class(fd) || is_oss_seq_class(fd))
 
 static int is_dsp_device(const char *pathname)
@@ -144,6 +148,7 @@ static int is_mixer_device(const char *pathname)
 	return 0;
 }
 
+#ifdef ENABLE_SEQUENCER
 static int is_seq_device(const char *pathname)
 {
 	if(!pathname) return 0;
@@ -151,6 +156,9 @@ static int is_seq_device(const char *pathname)
 	if(strncmp(pathname,"/dev/music",10) == 0) return 1;
 	return 0;
 }
+#else /* ENABLE_SEQUENCER */
+#define is_seq_device(pathname)		0
+#endif /* ENABLE_SEQUENCER */
 
 static int oss_pcm_fcntl(int fd, int cmd, ...)
 {
@@ -276,6 +284,7 @@ static ops_t ops[FD_CLASSES] = {
 		.mmap = bad_mmap,
 		.munmap = bad_munmap,
 	},
+#ifdef ENABLE_SEQUENCER
         [FD_OSS_SEQ] = {
 		.close = lib_oss_seq_close,
 		.write = lib_oss_seq_write,
@@ -285,6 +294,7 @@ static ops_t ops[FD_CLASSES] = {
 		.mmap = bad_mmap,
 		.munmap = bad_munmap,
 	},
+#endif /* ENABLE_SEQUENCER */
 };
 
 static int dsp_open_helper(const char *file, int oflag)
@@ -327,6 +337,7 @@ static int mixer_open_helper(const char *file, int oflag)
 	return fd;
 }
 
+#ifdef ENABLE_SEQUENCER
 static int seq_open_helper(const char *file, int oflag)
 {
 	int fd;
@@ -349,6 +360,21 @@ static int seq_open_helper(const char *file, int oflag)
 	}
 	return fd;
 } 
+
+#define call_seq_poll_prepare	lib_oss_seq_poll_prepare
+#define call_seq_poll_result	lib_oss_seq_poll_result
+#define call_seq_poll_fds	lib_oss_seq_poll_fds
+#define call_seq_select_prepare	lib_oss_seq_select_prepare
+#define call_seq_select_result	lib_oss_seq_select_result
+
+#else /* ENABLE_SEQUENCER */
+#define seq_open_helper(file, oflag)	-1
+#define call_seq_poll_prepare(fd, ...)	-1
+#define call_seq_poll_result(fd, ...)	-1
+#define call_seq_poll_fds(fd, ...)	-1
+#define call_seq_select_prepare(fd, ...) -1
+#define call_seq_select_result(fd, ...)	-1
+#endif /* ENABLE_SEQUENCER */
 
 #define DECL_OPEN(name, callback) \
 int name(const char *file, int oflag, ...) \
@@ -588,7 +614,7 @@ static int poll_with_pcm_or_seq(struct pollfd *pfds, unsigned long nfds, int tim
 			if (is_oss_pcm_class(fd))
 				count = lib_oss_pcm_poll_prepare(fd, fmode, &pfds1[nfds1]);
 			else
-				count = lib_oss_seq_poll_prepare(fd, fmode, &pfds1[nfds1]);
+				count = call_seq_poll_prepare(fd, fmode, &pfds1[nfds1]);
 			if (count < 0)
 				return -1;
 			nfds1 += count;
@@ -624,7 +650,7 @@ static int poll_with_pcm_or_seq(struct pollfd *pfds, unsigned long nfds, int tim
 			if (is_oss_pcm_class(fd))
 				result = lib_oss_pcm_poll_result(fd, &pfds1[nfds1]);
 			else
-				result = lib_oss_seq_poll_result(fd, &pfds1[nfds1]);
+				result = call_seq_poll_result(fd, &pfds1[nfds1]);
 			revents = 0;
 			if (result < 0) {
 				revents |= POLLNVAL;
@@ -636,7 +662,7 @@ static int poll_with_pcm_or_seq(struct pollfd *pfds, unsigned long nfds, int tim
 			if (is_oss_pcm_class(fd))
 				nfds1 += lib_oss_pcm_poll_fds(fd);
 			else
-				nfds1 += lib_oss_seq_poll_fds(fd);
+				nfds1 += call_seq_poll_fds(fd);
 		} else {
 			revents = pfds1[nfds1].revents;
 			nfds1++;
@@ -724,8 +750,8 @@ static int select_with_pcm_or_seq(int nfds, fd_set *rfds, fd_set *wfds,
 				res = lib_oss_pcm_select_prepare(fd, fmode, rfds1, wfds1,
 								 e ? efds1 : NULL);
 			else
-				res = lib_oss_seq_select_prepare(fd, fmode, rfds1, wfds1,
-								 e ? efds1 : NULL);
+				res = call_seq_select_prepare(fd, fmode, rfds1, wfds1,
+							      e ? efds1 : NULL);
 			if (res < 0)
 				return -1;
 			if (nfds1 < res + 1)
@@ -772,7 +798,7 @@ static int select_with_pcm_or_seq(int nfds, fd_set *rfds, fd_set *wfds,
 			if (is_oss_pcm_class(fd))
 				result = lib_oss_pcm_select_result(fd, rfds1, wfds1, efds1);
 			else
-				result = lib_oss_seq_select_result(fd, rfds1, wfds1, efds1);
+				result = call_seq_select_result(fd, rfds1, wfds1, efds1);
 			r1 = w1 = e1 = 0;
 			if (result < 0 && e) {
 				if (efds)

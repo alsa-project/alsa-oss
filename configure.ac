@@ -27,6 +27,19 @@ else
 fi
 AM_CONDITIONAL(WITH_AOSS, test x$with_aoss = xyes)
 
+dnl Check for aoss...
+AC_MSG_CHECKING(for sequencer)
+AC_ARG_WITH(sequencer,
+  [  --with-sequencer=yes,no     Enable OSS sequencer support],
+  with_sequencer="$withval", with_sequencer="yes")
+if test "$with_sequencer" = "yes"; then
+  AC_MSG_RESULT(yes)
+  AC_DEFINE(ENABLE_SEQUENCER,,[Support OSS sequencer])
+else
+  AC_MSG_RESULT(no)
+fi
+AM_CONDITIONAL(ENABLE_SEQUENCER, test x$with_sequencer = xyes)
+
 if test "$with_aoss" = "yes"; then
   OLD_CFLAGS="$CFLAGS"
   OLD_LIBS="$LIBS"

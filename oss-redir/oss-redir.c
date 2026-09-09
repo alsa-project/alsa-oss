@@ -60,6 +60,7 @@ static int (*x_oss_mixer_open)(const char *pathname, int flags);
 static int (*x_oss_mixer_close)(int fd);
 int (*oss_mixer_ioctl)(int fd, unsigned long int request, ...);
 
+#ifdef ENABLE_SEQUENCER
 static int (*x_oss_seq_open)(const char *pathname, int flags);
 static int (*x_oss_seq_close)(int fd);
 int (*oss_seq_nonblock)(int fd, int nonblock);
@@ -71,6 +72,7 @@ int (*oss_seq_select_result)(int fd, fd_set *readfds, fd_set *writefds, fd_set *
 int (*oss_seq_poll_fds)(int fd);
 int (*oss_seq_poll_prepare)(int fd, int fmode, struct pollfd *ufds);
 int (*oss_seq_poll_result)(int fd, struct pollfd *ufds);
+#endif /* ENABLE_SEQUENCER */
 
 static int native_pcm_nonblock(int fd, int nonblock)
 {
@@ -211,6 +213,7 @@ int oss_mixer_close(int fd)
 	return call_close(fd, x_oss_mixer_close);
 }
 
+#ifdef ENABLE_SEQUENCER
 int oss_seq_open(const char *pathname, int flags, ...)
 {
 	return call_open(pathname, flags, x_oss_seq_open);
@@ -220,6 +223,7 @@ int oss_seq_close(int fd)
 {
 	return call_close(fd, x_oss_seq_close);
 }
+#endif /* ENABLE_SEQUENCER */
 
 static void initialize(void)
 {
@@ -248,6 +252,7 @@ static void initialize(void)
 		oss_pcm_poll_prepare = native_pcm_poll_prepare;
 		oss_pcm_poll_result = native_pcm_poll_result;
 		oss_mixer_ioctl = ioctl;
+#ifdef ENABLE_SEQUENCER
 		/* reuse PCM helpers for sequencer */
 		oss_seq_nonblock = native_pcm_nonblock;
 		oss_seq_read = read;
@@ -258,6 +263,7 @@ static void initialize(void)
 		oss_seq_poll_fds = native_pcm_poll_fds;
 		oss_seq_poll_prepare = native_pcm_poll_prepare;
 		oss_seq_poll_result = native_pcm_poll_result;
+#endif /* ENABLE_SEQUENCER */
 	} else {
 		dl_handle = dlopen(hal, RTLD_NOW);
 		if (dl_handle == NULL) {
@@ -282,6 +288,7 @@ static void initialize(void)
 		x_oss_mixer_open = dlsym(dl_handle, "lib_oss_mixer_open");
 		x_oss_mixer_close = dlsym(dl_handle, "lib_oss_mixer_close");
 		oss_mixer_ioctl = dlsym(dl_handle, "lib_oss_mixer_ioctl");
+#ifdef ENABLE_SEQUENCER
 		x_oss_seq_open = dlsym(dl_handle, "lib_oss_seq_open");
 		x_oss_seq_close = dlsym(dl_handle, "lib_oss_seq_close");
 		oss_seq_nonblock = dlsym(dl_handle, "lib_oss_seq_nonblock");
@@ -293,5 +300,6 @@ static void initialize(void)
 		oss_seq_poll_fds = dlsym(dl_handle, "lib_oss_seq_poll_fds");
 		oss_seq_poll_prepare = dlsym(dl_handle, "lib_oss_seq_poll_prepare");
 		oss_seq_poll_result = dlsym(dl_handle, "lib_oss_seq_poll_result");
+#endif /* ENABLE_SEQUENCER */
 	}
 }

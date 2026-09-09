@@ -13,6 +13,9 @@ libaoss_la_LIBADD = libalsatoss.la
 libaoss_la_LDFLAGS = -version-info $(COMPATNUM)
 
 libalsatoss_la_CFLAGS = @ALSA_CFLAGS@
-libalsatoss_la_SOURCES = pcm.c mixer.c sequencer.c
+libalsatoss_la_SOURCES = pcm.c mixer.c
+if ENABLE_SEQUENCER
+libalsatoss_la_SOURCES += sequencer.c
+endif
 libalsatoss_la_LIBADD = @ALSA_LIBS@
 libalsatoss_la_LDFLAGS = -version-info $(COMPATNUM)
